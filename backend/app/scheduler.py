@@ -620,7 +620,7 @@ class Scheduler:
                                 catalyst: Optional[Dict[str, Any]], session_date: str):
         if not feats.get("price"):
             return
-        fp = "watch:" + sigsvc.catalyst_fingerprint(catalyst)[:10]
+        fp = "watch"  # one WATCH record per symbol per trading day
         async with SessionLocal() as db:
             if await sigsvc.recent_signal_exists(db, sym, session_date, STRATEGY_VERSION, fp):
                 return
@@ -657,8 +657,20 @@ class Scheduler:
             if not sigs:
                 return
             symbols = sorted({s.symbol for s in sigs})
+            phase_now = session_phase()
             try:
                 quotes = {q["symbol"]: q for q in await self.ctx.fmp.quotes(symbols)}
+                if phase_now in ("premarket", "afterhours"):
+                    # /quote lags for small caps outside RTH — merge the live
+                    # extended-hours trade print when it is fresher
+                    for sym_ in symbols:
+                        amt = await self.ctx.fmp.aftermarket_trade(sym_)
+                        if amt and amt.get("price") and amt.get("provider_ts"):
+                            q = quotes.get(sym_) or {"symbol": sym_}
+                            q_ts = q.get("provider_ts")
+                            if q_ts is None or amt["provider_ts"] > q_ts:
+                                quotes[sym_] = {**q, "price": amt["price"],
+                                                "provider_ts": amt["provider_ts"]}
             except Exception as e:
                 await self._health("warn", "tracking", f"quote fetch failed: {e}")
                 return  # tracking failure must not alter signals
@@ -674,6 +686,10 @@ class Scheduler:
                 q = quotes.get(sig.symbol)
                 if not q or not q.get("price"):
                     continue
+                q_ts = q.get("provider_ts")
+                if phase_now != "regular" and (
+                        q_ts is None or (now_utc() - q_ts).total_seconds() > 600):
+                    continue  # never write stale extended-hours prints into tracking
                 await sigsvc.update_tracking(db, sig, price=q["price"],
                                              provider_ts=q.get("provider_ts"),
                                              day_high=q.get("day_high"),
