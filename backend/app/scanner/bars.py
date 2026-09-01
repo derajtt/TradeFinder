@@ -157,4 +157,6 @@ def estimated_rvol(pm_volume: float, avg_daily_volume: Optional[float],
     frac = expected_pm_fraction(minute_of_day)
     if frac <= 0:
         return None
-    return pm_volume / (avg_daily_volume * frac)
+    # Cap: very early premarket the expected fraction is tiny, which makes the
+    # estimate explode for a few thousand shares. 50x is plenty to clear any gate.
+    return min(50.0, pm_volume / (avg_daily_volume * frac))
