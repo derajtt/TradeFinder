@@ -239,6 +239,35 @@ class BtData:
                 out.append(s)
         return out
 
+    async def form4_index(self, d: str) -> List[dict]:
+        """Form 4 rows (issuer CIK + accession) from the free daily index."""
+        from datetime import date as _date
+        dt = _date.fromisoformat(d)
+        q = (dt.month - 1) // 3 + 1
+        url = (f"https://www.sec.gov/Archives/edgar/daily-index/{dt.year}/QTR{q}/"
+               f"form.{dt.strftime('%Y%m%d')}.idx")
+        key = f"sec4:{d}"
+
+        async def fetch():
+            try:
+                r = await self._get_retry(url, headers={"User-Agent": self.sec_ua})
+            except Exception:
+                return ""
+            return r.text if r.status_code == 200 else ""
+        text = await self._cached(key, fetch)
+        out = []
+        for line in (text or "").splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0] == "4":
+                try:
+                    fn = parts[-1]
+                    out.append({"cik": parts[-3].lstrip("0"),
+                                "accession": fn.rsplit("/", 1)[-1]
+                                .replace(".txt", "")})
+                except IndexError:
+                    continue
+        return out
+
     async def sec_form_index(self, d: str) -> List[dict]:
         """Free EDGAR daily form index: every filing with form type + CIK."""
         dt = date.fromisoformat(d)

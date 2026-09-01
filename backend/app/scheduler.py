@@ -839,8 +839,19 @@ class Scheduler:
         for s in live_syms:
             ctx["bars_5m"][s] = await self.mctx.m5(s)
         ctx["earnings"] = await self.mctx.earnings_today() if run_daily else {}
-        ctx["insider_clusters"] = {}
-        ctx["fundamentals"] = {}
+        if run_daily:
+            try:
+                ctx["insider_clusters"] = await self.mctx.insider_clusters()
+            except Exception as e:
+                ctx["insider_clusters"] = {}
+                await self._health("warn", "insiders", f"{type(e).__name__}: {e}")
+            try:
+                ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)
+            except Exception:
+                ctx["fundamentals"] = {}
+        else:
+            ctx["insider_clusters"] = {}
+            ctx["fundamentals"] = {}
         profiles_cfg = get_profiles(settings)
         fired = 0
         for mid, meta in MODELS.items():

@@ -107,31 +107,87 @@ class ModelContext:
         self._earnings = (_time.monotonic(), out)
         return out
 
-    async def insider_clusters(self, sec) -> Dict[str, dict]:
-        """Form-4 purchase clusters from the last 5 sessions of EDGAR daily
-        indexes (acceptance-time source of truth lives in submissions)."""
+    async def insider_clusters(self, sec=None) -> Dict[str, dict]:
+        """Form-4 PURCHASE clusters, verified from the filing documents:
+        last 5 sessions of the free EDGAR daily index -> issuers with 2+ Form 4s
+        -> fetch each filing (bounded) and count distinct owners with real
+        open-market purchases (transaction code P, acquired). Sales, grants and
+        exercises are excluded — a Form 4 is never assumed to be a buy."""
         if _time.monotonic() - self._insiders[0] < 6 * 3600:
             return self._insiders[1]
         out: Dict[str, dict] = {}
         try:
+            import httpx
             from ..bt.data import BtData
-            data = BtData(SessionLocal, rps=2.0)
+            from ..config import get_config
+            data = BtData(SessionLocal, rps=1.5)
             cmap = await data.cik_ticker_map()
+            counts: Dict[str, list] = {}
             d = now_et().date()
-            counts: Dict[str, set] = {}
             checked = 0
             while checked < 5:
                 if is_trading_day(d):
                     checked += 1
-                    idx = await data.sec_form_index(str(d))
-                    # daily index excludes Form 4 by default filter; refetch raw
-                for _ in range(1):
-                    pass
+                    idx = await data.form4_index(str(d))
+                    for row in idx:
+                        sym = cmap.get(row["cik"])
+                        if sym:
+                            counts.setdefault(sym, []).append(
+                                (row["cik"], row["accession"]))
                 d -= timedelta(days=1)
+            cands = {s: rows for s, rows in counts.items() if len(rows) >= 2}
+            ua = get_config().sec_user_agent
+            fetched = 0
+            async with httpx.AsyncClient(timeout=20,
+                                         headers={"User-Agent": ua}) as client:
+                for sym, rows in sorted(cands.items(),
+                                        key=lambda kv: -len(kv[1]))[:12]:
+                    buyers = 0
+                    officer = False
+                    accs = []
+                    for cik, acc in rows[:4]:
+                        if fetched >= 25:
+                            break
+                        fetched += 1
+                        nod = acc.replace("-", "")
+                        url = (f"https://www.sec.gov/Archives/edgar/data/"
+                               f"{int(cik)}/{nod}.txt")
+                        try:
+                            r = await client.get(url)
+                            txt = r.text[:200000] if r.status_code == 200 else ""
+                        except httpx.HTTPError:
+                            txt = ""
+                        if ("<transactionCode>P</transactionCode>" in txt and
+                                ">A<" in txt):
+                            buyers += 1
+                            accs.append(acc)
+                            if "officerTitle" in txt or "isOfficer>1" in txt:
+                                officer = True
+                    if buyers >= 2:
+                        out[sym] = {"buyers": buyers, "officer": officer,
+                                    "accessions": accs,
+                                    "verified": "transaction_code_P"}
             await data.close()
         except Exception:
             pass
         self._insiders = (_time.monotonic(), out)
+        return out
+
+    async def fundamentals(self, symbols) -> Dict[str, dict]:
+        """Current-value TTM ratios (labeled snapshot; point-in-time not in plan)."""
+        out = {}
+        for s in symbols:
+            try:
+                data = await self.fmp._get("ratios-ttm", {"symbol": s},
+                                           cache_ttl=24 * 3600,
+                                           endpoint_name="ratios-ttm")
+                row = data[0] if isinstance(data, list) and data else None
+                if row:
+                    out[s] = {"pe": row.get("priceToEarningsRatioTTM")
+                              or row.get("peRatioTTM"),
+                              "quality": "CURRENT_TTM_SNAPSHOT"}
+            except Exception:
+                continue
         return out
 
 

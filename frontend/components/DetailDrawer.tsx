@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { apiGet } from '../lib/api';
+import { API_BASE, API_KEY, apiGet } from '../lib/api';
 import { fmtCompact, fmtEt, fmtEtDate, fmtNum, fmtPct, fmtPrice } from '../lib/format';
 import { TERMS } from '../lib/terms';
 import Chart, { type Bar } from './Chart';
@@ -39,13 +39,22 @@ const GATE_LABELS: Record<string, string> = {
 export default function DetailDrawer({ symbol, onClose }: { symbol: string; onClose: () => void }) {
   const [d, setD] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [story, setStory] = useState<any>(null);
+  const [jNote, setJNote] = useState('');
+  const [jSaved, setJSaved] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setD(null); setErr(null);
     apiGet<Detail>(`/api/candidates/${symbol}`)
-      .then((x) => alive && setD(x))
+      .then((x) => {
+        if (!alive) return;
+        setD(x);
+        const uid = (x.signals?.[0] as any)?.signal_uid;
+        if (uid) apiGet<any>(`/api/signals/${uid}`).then((s) => alive && setStory(s)).catch(() => {});
+      })
       .catch((e) => alive && setErr(String(e)));
+    setStory(null); setJNote(''); setJSaved(false);
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => { alive = false; window.removeEventListener('keydown', onKey); };
@@ -98,7 +107,7 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
             <KV k="PM High / Low" v={`${fmtPrice(feats.pm_high)} / ${fmtPrice(feats.pm_low)}`} />
             <KV k="Spread" v={fmtPct(feats.spread_pct, false)} tip={TERMS.spread} />
             <KV k="Bid / Ask" v={`${fmtPrice(feats.bid)} / ${fmtPrice(feats.ask)}`} />
-            <KV k="Market Cap" v={d.company.market_cap != null ? '$' + fmtCompact(d.company.market_cap) : (feats.market_cap != null ? '$' + fmtCompact(feats.market_cap) : '—')} tip={TERMS.mkt_cap} />
+            <KV k="Market Cap" v={d.company.market_cap != null ? '$' + fmtCompact(d.company.market_cap) : (feats.market_cap != null ? '$' + fmtCompact(feats.market_cap) : '—')} tip={TERMS.mkt_cap + ' Provider snapshot — labeled, not point-in-time.'} />
             <KV k="Float Rotation" v={feats.float_rotation != null ? fmtNum(feats.float_rotation * 100, 1) + '%' : '—'} tip={TERMS.float_rot} cls={feats.float_rotation >= 0.2 ? 'pos' : ''} />
             <KV k="Float" v={fmtCompact(d.company.float_shares ?? feats.float_shares)} tip={TERMS.float} />
             <KV k="Shares Out" v={fmtCompact(d.company.shares_outstanding ?? feats.shares_outstanding)} tip={TERMS.shares_out} />
@@ -225,6 +234,51 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
                  tip="Judged only on the early window: pop = WIN locked forever, drop = LOSS, neither = NEUTRAL." />
             </div>
           </>)}
+
+          {story && (story.events?.length || Object.keys(story.checkpoints ?? {}).length) ? (<>
+            <div className="subhead">Signal story — everything that happened, in order</div>
+            <div className="timeline">
+              {[
+                ...(story.events ?? []).map((e: any) => ({
+                  ts: e.ts, label: e.type.replace(/_/g, ' '),
+                  detail: e.type === 'created' ? `signal recorded @ ${fmtPrice(e.detail?.price)}`
+                    : e.type === 'paper_opened' ? `paper position filled @ ${fmtPrice(e.detail?.fill)} · stop ${fmtPrice(e.detail?.stop)}`
+                    : e.type === 'outcome_locked' ? `${e.detail?.policy}: ${e.detail?.class}`
+                    : e.type === 'correction' ? `correction: ${e.detail?.reason ?? ''}`
+                    : JSON.stringify(e.detail ?? {}).slice(0, 90),
+                  cls: e.type === 'correction' ? 'warn' : e.type === 'outcome_locked' ? 'buy' : 'neutral' })),
+                ...Object.entries(story.checkpoints ?? {}).map(([label, c]: any) => ({
+                  ts: null, label: `checkpoint ${label}`,
+                  detail: `${fmtPrice(c.price)} (${c.pct >= 0 ? '+' : ''}${c.pct}%)`,
+                  cls: c.pct >= 0 ? 'buy' : 'risk' })),
+              ].map((row: any, i: number) => (
+                <div className="tl-item" key={i}>
+                  <span className="tl-time">{row.ts ? fmtEtDate(row.ts) : '—'}</span>
+                  <span className={`badge ${row.cls}`}>{row.label}</span>
+                  <span className="dim" style={{ fontSize: 12 }}>{row.detail}</span>
+                </div>
+              ))}
+            </div>
+          </>) : null}
+
+          <div className="subhead">Journal</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input placeholder={`Note about ${symbol}…`} value={jNote}
+              onChange={(e) => { setJNote(e.target.value); setJSaved(false); }}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter' && jNote.trim()) {
+                  await fetch(`${API_BASE}/api/journal`, { method: 'POST',
+                    headers: { 'Content-Type': 'application/json',
+                               ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
+                    body: JSON.stringify({ symbol, note: jNote,
+                      signal_uid: (d?.signals?.[0] as any)?.signal_uid ?? '' }) });
+                  setJNote(''); setJSaved(true);
+                }
+              }}
+              style={{ flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--line)',
+                       color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontSize: 13 }} />
+            {jSaved && <span className="save-note" style={{ alignSelf: 'center' }}>saved ✓</span>}
+          </div>
 
           <div className="subhead">News timeline ({d.news.length})</div>
           <div className="timeline">
