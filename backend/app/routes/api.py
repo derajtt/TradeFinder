@@ -118,9 +118,31 @@ async def candidate_detail(symbol: str, request: Request,
         from ..scanner.bars import all_day_bars
         bars = await all_day_bars(db, symbol, days=5)
 
+    # watch history: every scan pass for this symbol today (score + price timeline)
+    from ..util.timeutil import now_et
+    today = str(now_et().date())
+    watch_rows = (await db.execute(
+        select(Candidate.created_at, Candidate.score, CandidateFeatureSnapshot.features)
+        .join(CandidateFeatureSnapshot, CandidateFeatureSnapshot.candidate_id == Candidate.id)
+        .where(Candidate.symbol == symbol, Candidate.session_date == today)
+        .order_by(Candidate.created_at).limit(400))).all()
+    watch = None
+    if watch_rows:
+        series = [{"t": r[0].isoformat(), "score": r[1],
+                   "price": (r[2] or {}).get("price")} for r in watch_rows]
+        first = series[0]
+        last_price = next((x["price"] for x in reversed(series) if x["price"]), None)
+        chg = None
+        if first.get("price") and last_price:
+            chg = round((last_price - first["price"]) / first["price"] * 100.0, 2)
+        watch = {"started_at": first["t"], "start_price": first.get("price"),
+                 "start_score": first.get("score"), "checks": len(series),
+                 "change_since_watch_pct": chg, "series": series}
+
     return {
         "symbol": symbol,
         "live": live,
+        "watch": watch,
         "company": {"name": (sym_row.name if sym_row else (live or {}).get("name", "")),
                     "exchange": (sym_row.exchange if sym_row else ""),
                     "cik": (sym_row.cik if sym_row else ""),

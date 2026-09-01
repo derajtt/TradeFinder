@@ -9,6 +9,7 @@ interface SettingsResp { settings: AppSettings; defaults: AppSettings;
 /** Fields where blank = no limit (nullable). */
 const NULLABLE = new Set(['market_cap_min', 'market_cap_max', 'float_min', 'float_max',
   'shares_outstanding_min', 'shares_outstanding_max', 'price_max']);
+const STRING_FIELDS = new Set(['buy_confirm_after_et']);
 
 const GROUPS: { title: string; hint?: string; fields: [keyof AppSettings, string, string?][] }[] = [
   {
@@ -38,6 +39,7 @@ const GROUPS: { title: string; hint?: string; fields: [keyof AppSettings, string
   {
     title: 'BUY gates',
     fields: [
+      ['buy_confirm_after_et' as any, 'Confirm BUY after (ET)', 'e.g. 07:00 — Schwab & many brokers open premarket at 7:00. Blank = confirm immediately. Earlier qualifiers show as EARLY WATCH.'],
       ['min_score_for_buy', 'Min score (0–100)'],
       ['min_rvol_for_buy', 'Min premarket RVOL (x)'],
       ['min_catalyst_confidence', 'Min catalyst confidence (0–1)'],
@@ -51,6 +53,7 @@ const GROUPS: { title: string; hint?: string; fields: [keyof AppSettings, string
     fields: [
       ['scan_interval_sec', 'Scan interval (sec)'],
       ['enrich_top_n', 'Enrich top N candidates'],
+      ['universe_sweep_per_cycle', 'Universe sweep per cycle', 'Full NASDAQ/NYSE/AMEX rotation — symbols quoted per cycle beyond the movers lists. 0 = off. 50 ≈ full rotation every ~35 min.'],
       ['openai_monthly_budget_usd', 'OpenAI monthly budget ($)'],
     ],
   },
@@ -87,6 +90,7 @@ export default function SettingsPage() {
       for (const [k, v] of Object.entries(form)) {
         if (typeof v === 'boolean') { patch[k] = v; continue; }
         const t = v.trim().replace(/,/g, '');
+        if (STRING_FIELDS.has(k)) { patch[k] = v.trim(); continue; }
         patch[k] = t === '' ? (NULLABLE.has(k) ? null : undefined) : Number(t);
         if (patch[k] === undefined) delete patch[k];
         if (Number.isNaN(patch[k])) delete patch[k];

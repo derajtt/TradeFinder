@@ -279,7 +279,42 @@ class FmpProvider:
                         "denominator": _f(row.get("denominator"))})
         return out
 
+    async def screener_universe(self, price_min=None, price_max=None,
+                                mcap_min=None, mcap_max=None) -> List[dict]:
+        """All active common stocks on NASDAQ/NYSE/AMEX inside a widened price band.
+        Screener prices are prior-session, so the band is widened to catch gappers."""
+        out: List[dict] = []
+        for exch in ("NASDAQ", "NYSE", "AMEX"):
+            params = {"exchange": exch, "isActivelyTrading": "true",
+                      "isEtf": "false", "isFund": "false", "limit": 5000}
+            if price_max is not None:
+                params["priceLowerThan"] = price_max * 1.6   # widened for overnight gaps
+            if price_min:
+                params["priceMoreThan"] = max(0.0, price_min * 0.5)
+            if mcap_min is not None:
+                params["marketCapMoreThan"] = mcap_min
+            if mcap_max is not None:
+                params["marketCapLowerThan"] = mcap_max
+            data = await self._get("company-screener", params, cache_ttl=12 * 3600,
+                                   endpoint_name=f"company-screener:{exch}")
+            for row in data if isinstance(data, list) else []:
+                sym = str(row.get("symbol", "")).upper()
+                out.append({"symbol": sym, "name": row.get("companyName") or "",
+                            "exchange": exch, "price": _f(row.get("price")),
+                            "market_cap": _f(row.get("marketCap")),
+                            "volume": _f(row.get("volume"))})
+        return out
+
     # ---- news ----
+    async def stock_news_for(self, symbol: str, limit: int = 25) -> List[dict]:
+        """Per-symbol news — catches catalysts that rolled out of the global feed."""
+        try:
+            data = await self._get("news/stock", {"symbols": symbol, "limit": limit},
+                                   cache_ttl=600, endpoint_name="news-stock")
+        except EntitlementError:
+            return []
+        return self._norm_news(data, "news")
+
     async def latest_stock_news(self, limit: int = 100) -> List[dict]:
         data = await self._get("news/stock-latest", {"limit": limit}, cache_ttl=180,
                                endpoint_name="news-stock-latest")

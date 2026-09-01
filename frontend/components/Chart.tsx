@@ -4,9 +4,10 @@ import { createChart, ColorType, type IChartApi, type UTCTimestamp } from 'light
 
 export interface Bar { time: number; open: number; high: number; low: number; close: number; volume: number; }
 
-export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow }: {
+export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow, watchStart }: {
   bars: Bar[]; buyPrice?: number | null; buyTime?: number | null;
   vwap?: number | null; pmHigh?: number | null; pmLow?: number | null;
+  watchStart?: number | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -38,15 +39,23 @@ export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow }: 
     if (vwap) line(vwap, '#38bdf8', 'VWAP');
     if (pmHigh) line(pmHigh, '#fbbf24', 'PM H');
     if (pmLow) line(pmLow, '#8b98b4', 'PM L');
-    if (buyTime) {
-      candles.setMarkers([{ time: buyTime as UTCTimestamp, position: 'belowBar',
-        color: '#34d399', shape: 'arrowUp', text: 'BUY' }]);
+    const markers: Parameters<typeof candles.setMarkers>[0] = [];
+    if (watchStart && bars.length) {
+      const nearest = bars.reduce((a, b) =>
+        Math.abs(b.time - watchStart) < Math.abs(a.time - watchStart) ? b : a);
+      markers.push({ time: nearest.time as UTCTimestamp, position: 'aboveBar',
+        color: '#38bdf8', shape: 'circle', text: 'WATCH' });
     }
+    if (buyTime) {
+      markers.push({ time: buyTime as UTCTimestamp, position: 'belowBar',
+        color: '#34d399', shape: 'arrowUp', text: 'BUY' });
+    }
+    if (markers.length) candles.setMarkers(markers.sort((a, b) => (a.time as number) - (b.time as number)));
     chart.timeScale().fitContent();
     const ro = new ResizeObserver(() => chart.applyOptions({ width: ref.current?.clientWidth ?? 600 }));
     ro.observe(ref.current);
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [bars, buyPrice, buyTime, vwap, pmHigh, pmLow]);
+  }, [bars, buyPrice, buyTime, vwap, pmHigh, pmLow, watchStart]);
 
   if (!bars.length) {
     return <div className="empty" style={{ border: '1px solid var(--line)', borderRadius: 12 }}>

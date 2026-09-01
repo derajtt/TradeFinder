@@ -44,3 +44,12 @@ async def test_api_key_guard_logic():
     assert secrets_compare("abc", "abc") is True
     assert secrets_compare("abc", "abd") is False
     assert secrets_compare("", "expected") is False
+
+
+async def test_time_setting_validation(db):
+    s = await update_settings(db, {"buy_confirm_after_et": "08:30"})
+    assert s["buy_confirm_after_et"] == "08:30"
+    s = await update_settings(db, {"buy_confirm_after_et": "25:99"})
+    assert s["buy_confirm_after_et"] == "07:00"   # invalid -> default
+    s = await update_settings(db, {"buy_confirm_after_et": ""})
+    assert s["buy_confirm_after_et"] == ""        # blank = immediate

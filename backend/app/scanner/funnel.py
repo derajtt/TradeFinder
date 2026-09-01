@@ -39,6 +39,25 @@ class ScanContext:
         self.news_by_symbol: Dict[str, List[dict]] = {}
 
 
+async def persist_news_items(db: AsyncSession, items) -> None:
+    """Dedup-persist normalized news items (used by global feed and per-symbol fetch)."""
+    for item in items:
+        sym = item.get("symbol") or ""
+        if not sym:
+            continue
+        h = item.get("content_hash") or _content_hash(sym, item.get("headline", ""),
+                                                      item.get("kind", ""))
+        item["content_hash"] = h
+        exists = (await db.execute(select(NewsItem.id).where(NewsItem.content_hash == h))).first()
+        if not exists:
+            db.add(NewsItem(symbol=sym, kind=item.get("kind", "news"),
+                            published_at=item.get("published_at"),
+                            source=(item.get("source") or "")[:128], url=item.get("url", ""),
+                            headline=item.get("headline", ""), excerpt=item.get("excerpt", ""),
+                            content_hash=h))
+    await db.commit()
+
+
 async def refresh_news(ctx: ScanContext, db: AsyncSession) -> None:
     """Global latest news + press releases (2 calls), grouped by symbol, persisted dedup'd."""
     from ..providers.fmp import EntitlementError
@@ -280,7 +299,8 @@ def compute_market_features(quote: dict, today_pm: List[dict], baselines: List[f
             w += 5
     accel = F.volume_acceleration(F.cumulative_volume(last5), [v for v in prior5 if v > 0])
 
-    vw = F.vwap(today_pm)
+    vol_bars = sum(1 for b in today_pm if (b.get("volume") or 0) > 0)
+    vw = F.vwap(today_pm) if vol_bars >= 3 else None  # partial VWAP must not gate BUY
     struct = F.structure_features(today_pm)
     price = quote.get("price")
     price_indicative = False

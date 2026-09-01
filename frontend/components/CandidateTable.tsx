@@ -85,7 +85,7 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
                   onKeyDown={(e) => e.key === 'Enter' && onSelect(r.symbol)}
                   aria-label={`Open ${r.symbol} details`}>
                 <td className="l">
-                  <div className="sym">{r.symbol} {r.buy && <span className="badge buy">BUY</span>}</div>
+                  <div className="sym">{r.symbol} {r.buy && <span className="badge buy">BUY</span>}{!r.buy && r.early && <span className="badge early" title="All gates pass except the broker premarket window — BUY confirms when it opens">EARLY</span>}</div>
                   <div className="co-name">{r.name}</div>
                 </td>
                 <td title={Object.entries(r.components || {}).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join('\n') + (r.penalties?.length ? '\npenalties: ' + r.penalties.map((p) => `${p.type} ${p.points}`).join(', ') : '')}>
@@ -101,16 +101,25 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
                 <td className={r.spread_pct != null && r.spread_pct > 5 ? 'neg' : ''}>{fmtPct(r.spread_pct, false)}</td>
                 <td className="l">
                   {r.catalyst_type
-                    ? <span className={`badge ${r.catalyst_direction === 'positive' ? 'buy' : r.catalyst_direction === 'negative' ? 'risk' : 'neutral'}`}>{r.catalyst_type}</span>
+                    ? <span className={`badge ${r.catalyst_direction === 'positive' ? 'buy' : r.catalyst_direction === 'negative' ? 'risk' : 'neutral'}`} title={r.catalyst_summary || undefined}>{r.catalyst_type}</span>
                     : <span className="faint">none</span>}
+                  {(r.catalyst_sources?.news ?? 0) > 0 && <span className="badge src" title={`${r.catalyst_sources!.news} news item(s) found for this symbol`}>news ×{r.catalyst_sources!.news}</span>}
                 </td>
-                <td className="l faint" style={{ fontSize: 11 }}>{r.filing_forms?.slice(0, 3).join(' · ') || '—'}</td>
+                <td className="l" style={{ fontSize: 11 }}>
+                  {r.filing_links?.length
+                    ? r.filing_links.slice(0, 3).map((f, i) => (
+                        <a key={i} className="badge src link" href={f.url} target="_blank" rel="noreferrer"
+                           onClick={(e) => e.stopPropagation()} title="Open on SEC EDGAR">{f.form}↗</a>
+                      ))
+                    : <span className="faint">{r.filing_forms?.slice(0, 3).join(' · ') || '—'}</span>}
+                </td>
                 <td className="l" style={{ maxWidth: 200 }}>
                   {r.hard_blocks?.length
                     ? <span className="badge risk" title={'Hard blocks (BUY impossible): ' + r.hard_blocks.join(', ')}>blocked</span>
                     : r.gates_failed?.length
                       ? <span className="badge warn" title={(r.gate_reasons ?? r.gates_failed).join('\n')}>gated</span>
                       : r.buy ? <span className="badge buy">qualified</span>
+                      : r.early ? <span className="badge early">early watch</span>
                       : <span className="badge neutral">watching</span>}
                   {(r.gate_reasons?.length || r.hard_blocks?.length) ? (
                     <div className="gate-why">{(r.hard_blocks?.length ? r.hard_blocks.map((b) => b.replace(/_/g, ' ')) : r.gate_reasons)?.slice(0, 2).join(' · ')}</div>

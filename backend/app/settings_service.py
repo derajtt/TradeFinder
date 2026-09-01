@@ -10,7 +10,15 @@ from .models import AppSetting, StrategyVersion
 from .scoring.engine import DEFAULT_SETTINGS, NULLABLE_KEYS, STRATEGY_VERSION
 
 
+STRING_KEYS = {"buy_confirm_after_et"}
+
+
 def _coerce(key: str, value):
+    if key in STRING_KEYS:
+        v = str(value or "").strip()
+        if v and not __import__("re").match(r"^([01]?\d|2[0-3]):[0-5]\d$", v):
+            return DEFAULT_SETTINGS.get(key)
+        return v
     if value is None or value == "" or value == "null":
         return None if key in NULLABLE_KEYS else DEFAULT_SETTINGS.get(key)
     default = DEFAULT_SETTINGS.get(key)

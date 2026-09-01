@@ -43,6 +43,11 @@ class Scheduler:
         self._split_cache: Dict[str, bool] = {}
         self._last_shortlist: List[str] = []
         self._pool_seen: Dict[str, float] = {}
+        self._universe: List[str] = []
+        self._universe_meta: Dict[str, dict] = {}
+        self._universe_ts: float = 0.0
+        self._sweep_idx: int = 0
+        self._news_quoted: Dict[str, float] = {}
         self.task: Optional[asyncio.Task] = None
         self.running = False
         self.state: Dict[str, Any] = {"phase": "idle", "last_cycle_at": None,
@@ -167,7 +172,27 @@ class Scheduler:
                         break  # plan does not include batch quotes; movers-only discovery
                     except Exception as e:
                         await self._health("warn", "fmp", f"exchange sweep {exch} failed: {e}")
-            universe_size = len(pool)
+            # full-exchange universe from the screener (refreshed twice a day)
+            import time as _tt
+            if not self._universe or _tt.monotonic() - self._universe_ts > 12 * 3600:
+                try:
+                    uni = await ctx.fmp.screener_universe(
+                        price_min=settings.get("price_min"),
+                        price_max=settings.get("price_max"),
+                        mcap_min=settings.get("market_cap_min"),
+                        mcap_max=settings.get("market_cap_max"))
+                    keep = [u for u in uni if looks_common_stock(u["symbol"], u["name"])]
+                    if keep:
+                        self._universe = [u["symbol"] for u in keep]
+                        self._universe_meta = {u["symbol"]: u for u in keep}
+                        self._universe_ts = _tt.monotonic()
+                        await self._health("info", "universe",
+                                           f"screener universe: {len(keep)} symbols")
+                except EntitlementError:
+                    pass
+                except Exception as e:
+                    await self._health("warn", "universe", f"screener failed: {e}")
+            universe_size = max(len(pool), len(self._universe))
 
             # cheap price prefilter using mover-list prices before spending quote calls
             pmin = settings.get("price_min") or 0
@@ -186,9 +211,46 @@ class Scheduler:
             else:
                 fresh_entrants = [s for s in pre if now_mono - self._pool_seen.get(s, 0) > 600]
                 quote_syms = list(dict.fromkeys(self._last_shortlist + fresh_entrants))[:45]
+            uni_set = set(self._universe)
+            # news-driven adds: universe symbols with fresh news get quoted immediately
+            news_adds = []
+            for s_ in ctx.news_by_symbol.keys():
+                if len(news_adds) >= 20:
+                    break
+                if s_ in uni_set and s_ not in quote_syms and                         now_mono - self._news_quoted.get(s_, 0) > 600:
+                    news_adds.append(s_)
+                    self._news_quoted[s_] = now_mono
+            # rotating sweep across the whole exchange universe
+            sweep_n = int(settings.get("universe_sweep_per_cycle") or 0)
+            sweep_adds = []
+            if sweep_n > 0 and self._universe:
+                taken = 0
+                start = self._sweep_idx
+                while taken < sweep_n and taken < len(self._universe):
+                    s_ = self._universe[self._sweep_idx % len(self._universe)]
+                    self._sweep_idx += 1
+                    if s_ not in quote_syms and s_ not in news_adds:
+                        sweep_adds.append(s_)
+                        taken += 1
+                    if self._sweep_idx - start > len(self._universe):
+                        break
+            quote_syms = list(dict.fromkeys(list(quote_syms) + news_adds + sweep_adds))
             for s_ in quote_syms:
                 self._pool_seen[s_] = now_mono
             quotes = {q["symbol"]: q for q in await ctx.fmp.quotes(quote_syms)}
+            # swept/news symbols join the pool when they are actually moving
+            for s_, q in quotes.items():
+                if s_ in pool:
+                    continue
+                gp = None
+                if q.get("price") and q.get("previous_close"):
+                    gp = (q["price"] - q["previous_close"]) / q["previous_close"] * 100
+                has_news = s_ in ctx.news_by_symbol
+                if gp is not None and (gp >= 3 or (has_news and abs(gp) >= 1)):
+                    meta = self._universe_meta.get(s_, {})
+                    pool[s_] = {"symbol": s_, "name": q.get("name") or meta.get("name", ""),
+                                "exchange": q.get("exchange") or meta.get("exchange", ""),
+                                "price": q.get("price"), "change_pct": gp}
             if phase == "regular":
                 # regular hours: quote volume is the true day counter -> derive bars
                 async with SessionLocal() as db:
@@ -200,7 +262,7 @@ class Scheduler:
                             pass
                     await db.commit()
             scored_pool = []
-            for sym in pre:
+            for sym in list(dict.fromkeys(list(pre) + [s_ for s_ in quotes if s_ in pool])):
                 q = quotes.get(sym)
                 if not q or not q.get("price"):
                     continue
@@ -337,8 +399,25 @@ class Scheduler:
             filings = await ctx.sec.recent_filings(sym, days=7)
         except Exception:
             filings = []
-        news_items = ctx.news_by_symbol.get(sym, [])
+        news_items = list(ctx.news_by_symbol.get(sym, []))
+        # multiple catalysts: per-symbol news query joins the global feed + SEC filings
+        try:
+            per_sym = await ctx.fmp.stock_news_for(sym)
+        except Exception:
+            per_sym = []
+        cutoff = now_utc() - timedelta(hours=30)
+        seen_h = {n.get("content_hash") for n in news_items}
+        for item in per_sym:
+            if item.get("published_at") and item["published_at"] < cutoff:
+                continue
+            h = funnel._content_hash(sym, item.get("headline", ""), item.get("kind", ""))
+            item["content_hash"] = h
+            if h not in seen_h:
+                news_items.append(item)
+                seen_h.add(h)
+        news_items.sort(key=lambda n: n.get("published_at") or cutoff, reverse=True)
         async with SessionLocal() as db:
+            await funnel.persist_news_items(db, news_items)
             if news_items or filings:
                 catalyst = await funnel.analyze_catalyst(ctx, db, sym, news_items, filings, settings)
             for f in filings:
@@ -357,6 +436,8 @@ class Scheduler:
 
         feats["catalyst"] = catalyst
         feats["filing_context"] = funnel.filing_context_from(filings)
+        feats["session_phase"] = session_phase()
+        feats["et_minutes"] = t_et.hour * 60 + t_et.minute
         result = score_candidate(feats, settings)
 
         async with SessionLocal() as db:
@@ -410,10 +491,15 @@ class Scheduler:
             "market_cap": feats.get("market_cap"),
             "spread_pct": feats.get("spread_pct"), "vwap": feats.get("vwap"),
             "above_vwap": feats.get("above_vwap"),
+            "early": result.get("early", False),
             "catalyst_type": (catalyst or {}).get("catalyst_type", ""),
+            "catalyst_sources": {"news": len(news_items),
+                                 "filings": len(filings)},
             "catalyst_direction": (catalyst or {}).get("direction", ""),
             "catalyst_summary": (catalyst or {}).get("summary", ""),
             "filing_forms": feats["filing_context"].get("recent_forms", [])[:6],
+            "filing_links": [{"form": f_["form_type"], "url": f_.get("primary_doc_url", "")}
+                             for f_ in filings[:5]],
             "hard_blocks": result["hard_blocks"], "gates_failed": gates_failed,
             "gate_reasons": gate_reasons, "explain": result.get("explain", []),
             "gates": result["gates"], "components": result["components"],

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { apiGet } from '../lib/api';
-import { fmtCompact, fmtEtDate, fmtNum, fmtPct, fmtPrice } from '../lib/format';
+import { fmtCompact, fmtEt, fmtEtDate, fmtNum, fmtPct, fmtPrice } from '../lib/format';
 import Chart, { type Bar } from './Chart';
 import Score from './Score';
 import ScoringLegend from './ScoringLegend';
@@ -9,6 +9,9 @@ import ScoringLegend from './ScoringLegend';
 interface Detail {
   symbol: string;
   live: any;
+  watch: { started_at: string; start_price: number | null; start_score: number | null;
+           checks: number; change_since_watch_pct: number | null;
+           series: { t: string; score: number; price: number | null }[] } | null;
   company: { name: string; exchange: string; cik: string; sector: string; industry: string;
              country: string; market_cap: number | null; float_shares: number | null;
              shares_outstanding: number | null; avg_volume: number | null };
@@ -96,9 +99,30 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
             <KV k="Country" v={d.company.country || '—'} mono={false} />
           </div>
 
+          {live?.early && (
+            <div className="early-banner">
+              <b>EARLY WATCH</b> — every gate passes except the broker premarket window.
+              BUY confirms automatically once your window opens (see Settings → Confirm BUY after).
+            </div>
+          )}
+
+          {d.watch && (<>
+            <div className="subhead">Watch history — since the scanner picked it up</div>
+            <div className="kv-grid">
+              <KV k="Watching since" v={fmtEt(d.watch.started_at)} mono={false} />
+              <KV k="Price at first sight" v={fmtPrice(d.watch.start_price)} />
+              <KV k="Change since watch" v={fmtPct(d.watch.change_since_watch_pct)}
+                 cls={(d.watch.change_since_watch_pct ?? 0) >= 0 ? 'pos' : 'neg'} />
+              <KV k="Score then → now" v={`${d.watch.start_score?.toFixed(0) ?? '—'} → ${(live?.score ?? d.watch.series.at(-1)?.score)?.toFixed(0) ?? '—'}`} />
+              <KV k="Scan passes" v={String(d.watch.checks)} />
+            </div>
+            {d.watch.series.length > 2 && <ScoreSpark series={d.watch.series} />}
+          </>)}
+
           <div className="subhead">Chart — accumulated 1-min bars</div>
           <Chart bars={d.bars} buyPrice={sig?.buy_price} vwap={feats.vwap}
-                 pmHigh={feats.pm_high} pmLow={feats.pm_low} />
+                 pmHigh={feats.pm_high} pmLow={feats.pm_low}
+                 watchStart={d.watch ? Math.floor(Date.parse(d.watch.started_at) / 1000) : null} />
 
           {(live?.explain?.length || scoreDetail?.explain?.length) ? (<>
             <div className="subhead">Path to BUY — every row must pass</div>
@@ -226,6 +250,30 @@ function KV({ k, v, cls = '', mono = true }: { k: string; v: string; cls?: strin
     <div className="kv">
       <div className="k">{k}</div>
       <div className={`v ${cls}`} style={mono ? undefined : { fontFamily: 'var(--sans)', fontSize: 12.5 }}>{v}</div>
+    </div>
+  );
+}
+
+
+function ScoreSpark({ series }: { series: { t: string; score: number }[] }) {
+  const w = 640, h = 60, pad = 4;
+  const xs = series.map((p) => Date.parse(p.t));
+  const min = Math.min(...xs), max = Math.max(...xs);
+  const pts = series.map((p) => {
+    const x = pad + ((Date.parse(p.t) - min) / Math.max(1, max - min)) * (w - 2 * pad);
+    const y = h - pad - (Math.min(100, Math.max(0, p.score)) / 100) * (h - 2 * pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const yFor = (s: number) => h - pad - (s / 100) * (h - 2 * pad);
+  return (
+    <div style={{ margin: '4px 0 2px' }}>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: 60 }} role="img"
+           aria-label="Score over time since first watch">
+        <line x1={pad} x2={w - pad} y1={yFor(75)} y2={yFor(75)} stroke="var(--buy)"
+              strokeDasharray="4 4" strokeOpacity="0.5" />
+        <polyline points={pts.join(' ')} fill="none" stroke="var(--accent)" strokeWidth="2" />
+      </svg>
+      <div className="faint" style={{ fontSize: 10 }}>score over time — dashed line = BUY threshold (75)</div>
     </div>
   );
 }

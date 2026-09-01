@@ -186,3 +186,39 @@ def test_explain_present_and_accurate():
     ex2 = {e["key"]: e for e in score_candidate(f, s())["explain"]}
     assert ex2["rvol"]["pass"] is False
     assert "1.0x" in ex2["rvol"]["actual"]
+
+
+def test_broker_window_gate():
+    st = s()
+    st["buy_confirm_after_et"] = "07:00"
+    f = copy.deepcopy(GOOD)
+    f["session_phase"] = "premarket"
+    f["et_minutes"] = 5 * 60 + 30          # 5:30 AM — before broker premarket
+    r = score_candidate(f, st)
+    assert r["gates"]["broker_window_gate"] is False
+    assert r["buy"] is False
+    assert r["early"] is True              # everything else passes -> EARLY WATCH
+    f["et_minutes"] = 7 * 60 + 1           # 7:01 AM
+    r2 = score_candidate(f, st)
+    assert r2["gates"]["broker_window_gate"] is True
+    assert r2["buy"] is True and r2["early"] is False
+
+
+def test_broker_window_blank_means_immediate():
+    st = s()
+    st["buy_confirm_after_et"] = ""
+    f = copy.deepcopy(GOOD)
+    f["session_phase"] = "premarket"
+    f["et_minutes"] = 4 * 60 + 30
+    r = score_candidate(f, st)
+    assert r["gates"]["broker_window_gate"] is True and r["buy"] is True
+
+
+def test_broker_window_regular_hours_open():
+    st = s()
+    st["buy_confirm_after_et"] = "07:00"
+    f = copy.deepcopy(GOOD)
+    f["session_phase"] = "regular"
+    f["et_minutes"] = 10 * 60
+    r = score_candidate(f, st)
+    assert r["gates"]["broker_window_gate"] is True

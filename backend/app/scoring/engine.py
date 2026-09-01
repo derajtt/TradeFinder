@@ -28,8 +28,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "max_extension_from_pm_high_pct": 25.0,
     "quote_freshness_sec": 120,
     "scan_interval_sec": 60,
-    "enrich_top_n": 20,
+    "enrich_top_n": 30,
+    "universe_sweep_per_cycle": 50,
     "reentry_cooldown_min": 60,
+    "buy_confirm_after_et": "07:00",   # brokers like Schwab open premarket ~7:00 ET; blank = confirm immediately
     "include_otc": False,
     "momentum_only_mode": False,   # separately-tested strategy, off by default
     "openai_monthly_budget_usd": 25.0,
@@ -211,6 +213,18 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
     score = max(0.0, min(100.0, raw))
 
     # ---- BUY gates ----
+    confirm_after = str(s.get("buy_confirm_after_et") or "").strip()
+    time_gate = True
+    confirm_minute = None
+    if confirm_after and f.get("session_phase", "premarket") == "premarket":
+        try:
+            hh, mm = confirm_after.split(":")
+            confirm_minute = int(hh) * 60 + int(mm)
+            et_min = f.get("et_minutes")
+            time_gate = et_min is None or et_min >= confirm_minute
+        except (ValueError, AttributeError):
+            time_gate = True
+
     gates = {
         "score_gate": score >= (s.get("min_score_for_buy") or 75),
         "catalyst_gate": (has_catalyst and confidence >= (s.get("min_catalyst_confidence") or 0.6)
@@ -225,10 +239,14 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
         "freshness_gate": bool(f.get("quote_fresh")),
         "spread_gate": spread is None or spread <= (s.get("max_spread_pct") or 5),
         "no_hard_block": not hard_blocks,
+        "broker_window_gate": time_gate,
         "price_confirmation_gate": (above_vwap is not False) and
             (dist is None or dist >= -(s.get("max_extension_from_pm_high_pct") or 25)),
     }
     buy = all(gates.values())
+    # early = would BUY right now except the broker window hasn't opened yet
+    early = (not buy) and (not time_gate) and all(v for k, v in gates.items()
+                                                  if k != "broker_window_gate")
 
     min_rvol = (s.get("min_rvol_for_buy") or 3.0)
     rvol_req = min_rvol * ((s.get("est_rvol_buy_multiplier") or 1.5) if f.get("rvol_estimated") else 1.0)
@@ -259,6 +277,9 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
         {"key": "blocks", "label": "No hard blocks", "pass": not hard_blocks,
          "actual": (", ".join(b.replace("_", " ") for b in hard_blocks) or "none"),
          "required": "none"},
+        {"key": "window", "label": "Broker premarket window", "pass": time_gate,
+         "actual": ("open" if time_gate else f"confirms at {confirm_after} ET"),
+         "required": (f"after {confirm_after} ET" if confirm_after else "any time")},
     ]
 
     return {
@@ -270,6 +291,7 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
         "hard_blocks": hard_blocks,
         "gates": gates,
         "buy": buy,
+        "early": early,
         "inputs": {k: f.get(k) for k in (
             "price", "gap_pct", "rvol", "rvol_estimated", "rvol_coverage", "rvol_confidence",
             "volume_acceleration", "pm_volume", "pm_dollar_volume", "spread_pct",

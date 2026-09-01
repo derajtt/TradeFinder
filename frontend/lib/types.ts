@@ -1,6 +1,6 @@
 export interface CandidateRow {
   symbol: string; name: string; exchange: string;
-  score: number; buy: boolean;
+  score: number; buy: boolean; early?: boolean;
   price: number | null; price_indicative?: boolean; gap_pct: number | null;
   rvol: number | null; rvol_confidence: number | null;
   pm_volume: number | null; pm_dollar_volume: number | null;
@@ -8,7 +8,9 @@ export interface CandidateRow {
   market_cap: number | null; spread_pct: number | null;
   vwap: number | null; above_vwap: boolean | null;
   catalyst_type: string; catalyst_direction: string; catalyst_summary: string;
-  filing_forms: string[]; hard_blocks: string[]; gates_failed: string[];
+  filing_forms: string[]; filing_links?: { form: string; url: string }[];
+  catalyst_sources?: { news: number; filings: number };
+  hard_blocks: string[]; gates_failed: string[];
   gates: Record<string, boolean>; components: Record<string, number>;
   gate_reasons?: string[];
   explain?: { key: string; label: string; pass: boolean; actual: string | number | null; required: string }[];
@@ -53,7 +55,9 @@ export interface AppSettings {
   min_rvol_for_buy: number; min_score_for_buy: number;
   min_catalyst_confidence: number; max_extension_from_pm_high_pct: number;
   quote_freshness_sec: number; scan_interval_sec: number; enrich_top_n: number;
+  universe_sweep_per_cycle: number;
   reentry_cooldown_min: number; include_otc: boolean; momentum_only_mode: boolean;
   allow_estimated_rvol: boolean; est_rvol_buy_multiplier: number;
+  buy_confirm_after_et: string;
   openai_monthly_budget_usd: number; paused: boolean;
 }

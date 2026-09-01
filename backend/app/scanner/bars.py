@@ -59,6 +59,25 @@ class Accumulator:
         prev = self.last_obs.get(symbol)
         self.last_obs[symbol] = (ts, volume, price)
         if prev is None:
+            # First observation this process for the symbol. FMP's extended-session
+            # counter is TODAY's cumulative, so carry it in as an opening bar —
+            # otherwise volume traded before we started watching is undercounted.
+            # Guard against double-count after restarts: only if no bars exist today.
+            if volume and volume > 0:
+                session_date = str(ts.date())
+                minute = ts.hour * 60 + ts.minute
+                from sqlalchemy import func as _func
+                existing_n = (await db.execute(
+                    select(_func.count(MarketBar.id)).where(
+                        MarketBar.symbol == symbol,
+                        MarketBar.session_date == session_date,
+                        MarketBar.source == "derived"))).scalar() or 0
+                if existing_n == 0:
+                    db.add(MarketBar(symbol=symbol, ts_utc=ts.astimezone(now_utc().tzinfo),
+                                     session_date=session_date, minute_of_day=minute,
+                                     open=price, high=price, low=price, close=price,
+                                     volume=float(volume), source="derived"))
+                    await db.flush()
             return
         prev_ts, prev_vol, prev_price = prev
         if prev_ts.date() != ts.date():
