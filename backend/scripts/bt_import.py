@@ -24,7 +24,7 @@ r = h.post(f"{base}/api/backtest/import", json={
 print("import:", r.status_code, r.text[:200])
 
 primary = res.get("primary")
-if primary:
+if primary and isinstance(primary.get("entry"), dict):
     # install winner parameters as live settings (prospective-only, versioned)
     e = primary["entry"]
     patch = {
