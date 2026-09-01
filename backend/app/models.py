@@ -185,6 +185,7 @@ class BuySignal(Base):
     since_signal_high: Mapped[float] = mapped_column(Float, nullable=True)
     since_signal_low: Mapped[float] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active|closed|invalidated
+    signal_type: Mapped[str] = mapped_column(String(8), default="buy")  # buy|watch
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     __table_args__ = (
         UniqueConstraint("symbol", "strategy_version", "session_date", "catalyst_fingerprint",

@@ -4,7 +4,8 @@ export interface CandidateRow {
   price: number | null; price_indicative?: boolean; gap_pct: number | null;
   rvol: number | null; rvol_confidence: number | null;
   pm_volume: number | null; pm_dollar_volume: number | null;
-  float_shares: number | null; shares_outstanding: number | null;
+  float_shares: number | null; float_rotation?: number | null;
+  shares_outstanding: number | null;
   market_cap: number | null; spread_pct: number | null;
   vwap: number | null; above_vwap: boolean | null;
   catalyst_type: string; catalyst_direction: string; catalyst_summary: string;
@@ -27,7 +28,7 @@ export interface SignalRow {
   current: number | null; current_ts: string | null;
   day_high: number | null; day_low: number | null;
   since_high: number | null; since_low: number | null;
-  status: string; is_demo: boolean; score: number | null;
+  status: string; is_demo: boolean; signal_type?: string; score: number | null;
   catalyst_type: string;
   checkpoints: Record<string, { price: number; pct: number }>;
   change_abs: number | null; change_pct: number | null;

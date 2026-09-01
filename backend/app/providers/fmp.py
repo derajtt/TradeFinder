@@ -208,6 +208,20 @@ class FmpProvider:
         except Exception:
             return None
 
+    async def aftermarket_trade(self, symbol: str) -> Optional[dict]:
+        """Latest extended-hours TRADE print — the real live premarket price."""
+        try:
+            data = await self._get("aftermarket-trade", {"symbol": symbol},
+                                   cache_ttl=20, endpoint_name="aftermarket-trade")
+        except EntitlementError:
+            return None
+        row = data[0] if isinstance(data, list) and data else data if isinstance(data, dict) else None
+        if not row:
+            return None
+        return {"symbol": symbol, "price": _f(row.get("price")),
+                "size": _f(row.get("tradeSize")),
+                "provider_ts": _parse_ts(row.get("timestamp"))}
+
     # ---- enrichment ----
     async def profile(self, symbol: str) -> Optional[dict]:
         data = await self._get("profile", {"symbol": symbol}, cache_ttl=6 * 3600,

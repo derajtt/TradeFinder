@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { apiGet } from '../lib/api';
 import { fmtCompact, fmtEt, fmtEtDate, fmtNum, fmtPct, fmtPrice } from '../lib/format';
+import { TERMS } from '../lib/terms';
 import Chart, { type Bar } from './Chart';
 import Score from './Score';
 import ScoringLegend from './ScoringLegend';
@@ -14,7 +15,8 @@ interface Detail {
            series: { t: string; score: number; price: number | null }[] } | null;
   company: { name: string; exchange: string; cik: string; sector: string; industry: string;
              country: string; market_cap: number | null; float_shares: number | null;
-             shares_outstanding: number | null; avg_volume: number | null };
+             shares_outstanding: number | null; avg_volume: number | null;
+             description?: string; website?: string; free_float_pct?: number | null };
   snapshot: { features: Record<string, any>; score_detail: any; at: string } | null;
   catalyst: any;
   news: { headline: string; source: string; url: string; kind: string; published_at: string | null }[];
@@ -79,22 +81,28 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
         {!d && !err && <div className="skel" style={{ height: 300, marginTop: 20 }} />}
 
         {d && (<>
+          {d.company.description && (
+            <p className="co-desc">{d.company.description}
+              {d.company.website && <> <a href={d.company.website} target="_blank" rel="noreferrer">{d.company.website.replace(/^https?:\/\//, '')} ↗</a></>}
+            </p>
+          )}
           <div className="kv-grid">
-            <KV k={feats.price_indicative ? 'Price (indicative mid)' : 'Price'} v={(feats.price_indicative ? '~' : '') + fmtPrice(feats.price)} />
-            <KV k="Gap %" v={fmtPct(feats.gap_pct)} cls={(feats.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'} />
-            <KV k={`RVOL${feats.rvol_estimated ? ' (est)' : ''}`} v={feats.rvol != null ? fmtNum(feats.rvol, 1) + 'x' : '—'} />
-            <KV k="PM Volume" v={fmtCompact(feats.pm_volume)} />
-            <KV k="PM $ Volume" v={feats.pm_dollar_volume != null ? '$' + fmtCompact(feats.pm_dollar_volume) : '—'} />
-            <KV k="VWAP" v={fmtPrice(feats.vwap)} />
+            <KV k={feats.price_indicative ? 'Price (indicative mid)' : 'Price'} v={(feats.price_indicative ? '~' : '') + fmtPrice(feats.price)} tip={TERMS.price} />
+            <KV k="Gap %" v={fmtPct(feats.gap_pct)} cls={(feats.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'} tip={TERMS.gap} />
+            <KV k={`RVOL${feats.rvol_estimated ? ' (est)' : ''}`} v={feats.rvol != null ? fmtNum(feats.rvol, 1) + 'x' : '—'} tip={TERMS.rvol} />
+            <KV k="PM Volume" v={fmtCompact(feats.pm_volume)} tip={TERMS.pm_vol} />
+            <KV k="PM $ Volume" v={feats.pm_dollar_volume != null ? '$' + fmtCompact(feats.pm_dollar_volume) : '—'} tip={TERMS.pm_dvol} />
+            <KV k="VWAP" v={fmtPrice(feats.vwap)} tip={TERMS.vwap} />
             <KV k="Above VWAP" v={feats.above_vwap === true ? 'Yes' : feats.above_vwap === false ? 'No' : 'n/a'}
                cls={feats.above_vwap === true ? 'pos' : feats.above_vwap === false ? 'neg' : ''} />
             <KV k="PM High / Low" v={`${fmtPrice(feats.pm_high)} / ${fmtPrice(feats.pm_low)}`} />
-            <KV k="Spread" v={fmtPct(feats.spread_pct, false)} />
+            <KV k="Spread" v={fmtPct(feats.spread_pct, false)} tip={TERMS.spread} />
             <KV k="Bid / Ask" v={`${fmtPrice(feats.bid)} / ${fmtPrice(feats.ask)}`} />
-            <KV k="Market Cap" v={d.company.market_cap != null ? '$' + fmtCompact(d.company.market_cap) : (feats.market_cap != null ? '$' + fmtCompact(feats.market_cap) : '—')} />
-            <KV k="Float" v={fmtCompact(d.company.float_shares ?? feats.float_shares)} />
-            <KV k="Shares Out" v={fmtCompact(d.company.shares_outstanding ?? feats.shares_outstanding)} />
-            <KV k="Avg Volume" v={fmtCompact(d.company.avg_volume)} />
+            <KV k="Market Cap" v={d.company.market_cap != null ? '$' + fmtCompact(d.company.market_cap) : (feats.market_cap != null ? '$' + fmtCompact(feats.market_cap) : '—')} tip={TERMS.mkt_cap} />
+            <KV k="Float Rotation" v={feats.float_rotation != null ? fmtNum(feats.float_rotation * 100, 1) + '%' : '—'} tip={TERMS.float_rot} cls={feats.float_rotation >= 0.2 ? 'pos' : ''} />
+            <KV k="Float" v={fmtCompact(d.company.float_shares ?? feats.float_shares)} tip={TERMS.float} />
+            <KV k="Shares Out" v={fmtCompact(d.company.shares_outstanding ?? feats.shares_outstanding)} tip={TERMS.shares_out} />
+            <KV k="Avg Volume" v={fmtCompact(d.company.avg_volume)} tip={TERMS.avg_vol} />
             <KV k="Industry" v={d.company.industry || '—'} mono={false} />
             <KV k="Country" v={d.company.country || '—'} mono={false} />
           </div>
@@ -245,10 +253,10 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
   );
 }
 
-function KV({ k, v, cls = '', mono = true }: { k: string; v: string; cls?: string; mono?: boolean }) {
+function KV({ k, v, cls = '', mono = true, tip }: { k: string; v: string; cls?: string; mono?: boolean; tip?: string }) {
   return (
-    <div className="kv">
-      <div className="k">{k}</div>
+    <div className="kv" title={tip}>
+      <div className="k">{k}{tip ? <span className="tip-mark" aria-hidden> ?</span> : null}</div>
       <div className={`v ${cls}`} style={mono ? undefined : { fontFamily: 'var(--sans)', fontSize: 12.5 }}>{v}</div>
     </div>
   );

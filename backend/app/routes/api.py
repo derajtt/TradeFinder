@@ -50,6 +50,7 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
                                      )).scalar() or 0
     active = (await db.execute(select(func.count(BuySignal.id))
                                .where(BuySignal.status == "active",
+                                      BuySignal.signal_type == "buy",
                                       BuySignal.is_demo == False))).scalar() or 0  # noqa: E712
     return {
         "et_time": t.isoformat(), "phase": session_phase(),
@@ -153,7 +154,10 @@ async def candidate_detail(symbol: str, request: Request,
                     "market_cap": (ref.market_cap if ref else None),
                     "float_shares": (ref.float_shares if ref else None),
                     "shares_outstanding": (ref.shares_outstanding if ref else None),
-                    "avg_volume": (ref.avg_volume if ref else None)},
+                    "avg_volume": (ref.avg_volume if ref else None),
+                    "description": (((ref.payload or {}).get("profile") or {}).get("description", "") if ref else ""),
+                    "website": (((ref.payload or {}).get("profile") or {}).get("website", "") if ref else ""),
+                    "free_float_pct": (((ref.payload or {}).get("float") or {}).get("free_float_pct") if ref else None)},
         "snapshot": ({"features": snap.features, "score_detail": snap.score_detail,
                       "at": snap.created_at.isoformat()} if snap else None),
         "catalyst": ({"direction": cat.direction, "materiality": cat.materiality,
@@ -202,6 +206,7 @@ async def signals(active_only: bool = False, include_demo: bool = False,
             "day_high": s.day_high, "day_low": s.day_low,
             "since_high": s.since_signal_high, "since_low": s.since_signal_low,
             "status": s.status, "is_demo": s.is_demo,
+            "signal_type": getattr(s, "signal_type", "buy"),
             "score": (s.score_snapshot or {}).get("score"),
             "catalyst_type": ((s.evidence_snapshot or {}).get("catalyst") or {}).get("catalyst_type", ""),
             "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
@@ -250,6 +255,7 @@ async def signal_detail(signal_uid: str, db: AsyncSession = Depends(get_session)
         "current": s.current_live_price, "day_high": s.day_high, "day_low": s.day_low,
         "since_high": s.since_signal_high, "since_low": s.since_signal_low,
         "status": s.status, "is_demo": s.is_demo,
+        "signal_type": getattr(s, "signal_type", "buy"),
         "score_snapshot": s.score_snapshot, "evidence_snapshot": s.evidence_snapshot,
         "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
         "events": [{"ts": e.ts_utc.isoformat(), "type": e.event_type, "detail": e.detail}
@@ -260,8 +266,9 @@ async def signal_detail(signal_uid: str, db: AsyncSession = Depends(get_session)
 
 @router.get("/performance")
 async def performance(db: AsyncSession = Depends(get_session)):
-    rows = (await db.execute(select(BuySignal).where(BuySignal.is_demo == False)  # noqa: E712
-                             )).scalars().all()
+    rows = (await db.execute(select(BuySignal).where(
+        BuySignal.is_demo == False,  # noqa: E712
+        BuySignal.signal_type == "buy"))).scalars().all()
     def band(score):
         if score is None: return "unknown"
         if score >= 90: return "90+"

@@ -29,7 +29,8 @@ async def create_buy_signal(session: AsyncSession, *, symbol: str, session_date:
                             provider_ts: Optional[datetime],
                             score_snapshot: Dict[str, Any],
                             evidence_snapshot: Dict[str, Any],
-                            is_demo: bool = False) -> Optional[BuySignal]:
+                            is_demo: bool = False,
+                            signal_type: str = "buy") -> Optional[BuySignal]:
     """Returns the new signal, or None if idempotency blocked a duplicate."""
     fp = catalyst_fingerprint(evidence_snapshot.get("catalyst"))
     sig = BuySignal(
@@ -48,7 +49,7 @@ async def create_buy_signal(session: AsyncSession, *, symbol: str, session_date:
         current_price_ts=now_utc(),
         day_high=float(price), day_low=float(price),
         since_signal_high=float(price), since_signal_low=float(price),
-        status="active", is_demo=is_demo,
+        status="active", signal_type=signal_type, is_demo=is_demo,
     )
     session.add(sig)
     try:

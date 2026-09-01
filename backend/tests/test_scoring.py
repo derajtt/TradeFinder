@@ -222,3 +222,25 @@ def test_broker_window_regular_hours_open():
     f["et_minutes"] = 10 * 60
     r = score_candidate(f, st)
     assert r["gates"]["broker_window_gate"] is True
+
+
+def test_v11_low_float_and_rotation_scoring():
+    base = copy.deepcopy(GOOD)
+    base["float_shares"] = 60_000_000
+    base["float_rotation"] = 0.005
+    lo = copy.deepcopy(GOOD)
+    lo["float_shares"] = 1_500_000       # ultra-low float
+    lo["float_rotation"] = 0.6           # 60% of float already traded
+    r_hi = score_candidate(base, s())
+    r_lo = score_candidate(lo, s())
+    assert r_lo["score"] > r_hi["score"]                 # low float + rotation wins
+    assert r_lo["components"]["company_quality"] >= r_hi["components"]["company_quality"] + 4
+    assert r_lo["components"]["momentum_volume"] <= 30   # cap respected
+    assert r_lo["strategy_version"] == "v1.1.0"
+
+
+def test_v11_microcap_sweet_spot():
+    small = copy.deepcopy(GOOD); small["market_cap"] = 80e6
+    huge = copy.deepcopy(GOOD); huge["market_cap"] = 4e9
+    assert (score_candidate(small, s())["components"]["company_quality"] >
+            score_candidate(huge, s())["components"]["company_quality"])

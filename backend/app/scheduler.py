@@ -386,6 +386,15 @@ class Scheduler:
                 baselines = await barmod.baseline_pm_cum_volumes(db, sym, session_dt,
                                                                  cur_minute)
         amq = await ctx.fmp.aftermarket_quote(sym) if session_phase() in ("premarket", "afterhours") else None
+        if session_phase() == "premarket":
+            # /quote trade prints lag for small caps premarket; the aftermarket-trade
+            # endpoint carries the real extended-hours tape. Use whichever is fresher.
+            amt = await ctx.fmp.aftermarket_trade(sym)
+            if amt and amt.get("price") and amt.get("provider_ts"):
+                q_ts0 = quote.get("provider_ts")
+                if q_ts0 is None or amt["provider_ts"] > q_ts0:
+                    quote = {**quote, "price": amt["price"],
+                             "provider_ts": amt["provider_ts"]}
         if amq is not None and session_phase() == "premarket":
             # extended-hours volume counter (resets each session) is the honest PM source
             amq_ts = amq.get("provider_ts")
@@ -393,7 +402,9 @@ class Scheduler:
             fresh_trade = q_ts is not None and (now_utc() - q_ts).total_seconds() <= 180
             obs_price = quote.get("price") if fresh_trade else None
             if obs_price is None and amq.get("bid") and amq.get("ask") and amq["ask"] >= amq["bid"] > 0:
-                obs_price = (amq["bid"] + amq["ask"]) / 2.0  # indicative mid; BUY still needs a fresh trade
+                _mid = (amq["bid"] + amq["ask"]) / 2.0
+                if (amq["ask"] - amq["bid"]) / _mid * 100.0 <= 15.0:
+                    obs_price = _mid  # tight-book indicative mid; BUY still needs a fresh trade
             async with SessionLocal() as db:
                 try:
                     await self.acc.record(db, sym, obs_price, amq.get("volume"), amq_ts)
@@ -411,6 +422,9 @@ class Scheduler:
             bar_source=bar_source)
         feats["market_cap"] = (profile or {}).get("market_cap") or quote.get("market_cap")
         feats["float_shares"] = (float_data or {}).get("float_shares")
+        feats["float_rotation"] = ((feats.get("pm_volume") or 0) / feats["float_shares"]
+                                   if feats.get("float_shares") and feats.get("pm_volume")
+                                   else None)
         feats["shares_outstanding"] = (float_data or {}).get("shares_outstanding")
         feats["has_revenue"] = bool((profile or {}).get("sector"))
         feats["recent_reverse_split"] = await self._had_recent_reverse_split(sym)
@@ -481,6 +495,14 @@ class Scheduler:
 
         if result["buy"] and not gates_failed:
             await self._maybe_fire_buy(sym, feats, result, catalyst, filings, session_date)
+        elif (settings.get("watch_enabled", True)
+              and result["score"] >= (settings.get("watch_score_min") or 50)
+              and not result["hard_blocks"]
+              and feats.get("quote_fresh")
+              and (feats.get("pm_volume") or 0) > 0):
+            # WATCH pick: notable but not fully qualified — permanently recorded and
+            # tracked from the price it was found at, clearly labeled non-BUY.
+            await self._maybe_fire_watch(sym, feats, result, catalyst, session_date)
 
         def _fmt_n(v):
             if v is None: return "?"
@@ -513,6 +535,7 @@ class Scheduler:
             "rvol_confidence": feats.get("rvol_confidence"),
             "pm_volume": feats.get("pm_volume"), "pm_dollar_volume": feats.get("pm_dollar_volume"),
             "float_shares": feats.get("float_shares"),
+            "float_rotation": feats.get("float_rotation"),
             "shares_outstanding": feats.get("shares_outstanding"),
             "market_cap": feats.get("market_cap"),
             "spread_pct": feats.get("spread_pct"), "vwap": feats.get("vwap"),
@@ -589,6 +612,38 @@ class Scheduler:
                 await self._health("info", "signals", f"BUY {sym} @ {feats['price']}")
                 await broadcaster.publish("buy_signal", {
                     "symbol": sym, "price": feats["price"],
+                    "score": result["score"], "initiated_at": sig.initiated_at.isoformat(),
+                    "signal_uid": sig.signal_uid})
+
+    async def _maybe_fire_watch(self, sym: str, feats: Dict[str, Any],
+                                result: Dict[str, Any],
+                                catalyst: Optional[Dict[str, Any]], session_date: str):
+        if not feats.get("price"):
+            return
+        fp = "watch:" + sigsvc.catalyst_fingerprint(catalyst)[:10]
+        async with SessionLocal() as db:
+            if await sigsvc.recent_signal_exists(db, sym, session_date, STRATEGY_VERSION, fp):
+                return
+            evidence = {"catalyst": catalyst,
+                        "features": {k: feats.get(k) for k in (
+                            "price", "gap_pct", "rvol", "pm_volume", "pm_dollar_volume",
+                            "float_shares", "float_rotation", "vwap", "spread_pct",
+                            "provider_ts")}}
+            # reuse the immutable-signal machinery; fingerprint prefix separates
+            # watch idempotency from a later full BUY on the same catalyst
+            sig = await sigsvc.create_buy_signal(
+                db, symbol=sym, session_date=session_date,
+                strategy_version=STRATEGY_VERSION, price=feats["price"],
+                price_source=f"fmp:premarket-trade@{feats.get('provider_ts') or 'obs'}",
+                provider_ts=None, score_snapshot=result,
+                evidence_snapshot=evidence, signal_type="watch")
+            if sig:
+                # patch fingerprint to the watch-prefixed one for idempotency
+                sig.catalyst_fingerprint = fp
+                await db.commit()
+                await self._health("info", "signals", f"WATCH {sym} @ {feats['price']} (score {result['score']})")
+                await broadcaster.publish("buy_signal", {
+                    "symbol": sym, "price": feats["price"], "type": "watch",
                     "score": result["score"], "initiated_at": sig.initiated_at.isoformat(),
                     "signal_uid": sig.signal_uid})
 

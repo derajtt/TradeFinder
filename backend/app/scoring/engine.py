@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-STRATEGY_VERSION = "v1.0.0"
+STRATEGY_VERSION = "v1.1.0"
 
 # ---- default thresholds (Settings can change them; changes apply prospectively) ----
 DEFAULT_SETTINGS: Dict[str, Any] = {
@@ -34,6 +34,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "buy_confirm_after_et": "07:00",   # brokers like Schwab open premarket ~7:00 ET; blank = confirm immediately
     "include_otc": False,
     "momentum_only_mode": False,   # separately-tested strategy, off by default
+    "watch_enabled": True,         # record notable candidates as WATCH picks (tracked like signals)
+    "watch_score_min": 50,
     "openai_monthly_budget_usd": 25.0,
     "paused": False,
 }
@@ -85,24 +87,32 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
     pts = 0.0
     rvol = f.get("rvol")
     if rvol is not None:
-        if rvol >= 10: pts += 12
-        elif rvol >= 5: pts += 9
-        elif rvol >= 3: pts += 6
+        if rvol >= 10: pts += 10
+        elif rvol >= 5: pts += 8
+        elif rvol >= 3: pts += 5
         elif rvol >= 2: pts += 3
         if f.get("rvol_estimated"):
             pts *= 0.7  # lower-confidence estimated baseline
     accel = f.get("volume_acceleration")
     if accel is not None:
-        if accel >= 3: pts += 6
-        elif accel >= 1.5: pts += 3
+        if accel >= 3: pts += 5
+        elif accel >= 1.5: pts += 2.5
     gap = f.get("gap_pct")
     if gap is not None:
-        if 10 <= gap <= 80: pts += 8
-        elif 5 <= gap < 10: pts += 5
-        elif gap > 80: pts += 3   # extreme extension scores less
-        elif gap >= 3: pts += 2
+        if 10 <= gap <= 80: pts += 7
+        elif 5 <= gap < 10: pts += 4
+        elif gap > 80: pts += 2.5   # extreme extension scores less
+        elif gap >= 3: pts += 1.5
     if f.get("hh_hl") == 1.0:
-        pts += 4
+        pts += 3
+    # float rotation: fraction of the float already traded premarket — the
+    # classic "in play" signal for low-float runners
+    rot = f.get("float_rotation")
+    if rot is not None:
+        if rot >= 0.50: pts += 6
+        elif rot >= 0.20: pts += 4.5
+        elif rot >= 0.05: pts += 3
+        elif rot >= 0.01: pts += 1.5
     comp["momentum_volume"] = min(30.0, pts)
 
     # ---- Catalyst quality (25) ----
@@ -161,15 +171,21 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
         elif dist <= 20: pts += 1
     comp["price_confirmation"] = min(10.0, pts)
 
-    # ---- Company quality (10) ----
+    # ---- Company quality (10) — float-first for premarket runner hunting ----
     pts = 0.0
-    mc = f.get("market_cap")
-    if mc is not None and mc >= 50_000_000: pts += 3
-    elif mc is not None and mc >= 20_000_000: pts += 2
     fl = f.get("float_shares")
     if fl is not None and fl > 0:
-        pts += 3   # float known
-        if fl < 20_000_000: pts += 2   # low float adds momentum quality
+        if fl < 2_000_000: pts += 6      # ultra-low float: maximum squeeze fuel
+        elif fl < 5_000_000: pts += 5
+        elif fl < 10_000_000: pts += 4
+        elif fl < 20_000_000: pts += 3
+        elif fl < 50_000_000: pts += 1.5
+        else: pts += 0.5                 # float known but heavy
+    mc = f.get("market_cap")
+    if mc is not None and 10_000_000 <= mc <= 500_000_000:
+        pts += 2                          # microcap sweet spot for % moves
+    elif mc is not None and mc < 2_000_000_000:
+        pts += 1
     if f.get("has_revenue"):
         pts += 2
     comp["company_quality"] = min(10.0, pts)
@@ -294,7 +310,7 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
         "early": early,
         "inputs": {k: f.get(k) for k in (
             "price", "gap_pct", "rvol", "rvol_estimated", "rvol_coverage", "rvol_confidence",
-            "volume_acceleration", "pm_volume", "pm_dollar_volume", "spread_pct",
+            "volume_acceleration", "pm_volume", "pm_dollar_volume", "float_rotation", "spread_pct",
             "above_vwap", "vwap", "dist_from_high_pct", "hh_hl", "market_cap",
             "float_shares", "shares_outstanding", "quote_fresh", "halted",
             "volume_incomplete", "data_disagreement", "recent_reverse_split")},

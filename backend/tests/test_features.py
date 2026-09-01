@@ -120,3 +120,21 @@ def test_fresh_trade_price_wins_over_mid():
     assert f["price"] == 0.85
     assert f["price_indicative"] is False
     assert f["quote_fresh"] is True
+
+
+def test_wide_book_mid_rejected():
+    """A wide 4 AM book must NOT produce an indicative mid — keep the stale print."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from app.scanner.funnel import compute_market_features
+    from app.scoring.engine import DEFAULT_SETTINGS
+
+    now = datetime.now(timezone.utc)
+    et = now.astimezone(ZoneInfo("America/New_York")).replace(hour=5, minute=0)
+    quote = {"price": 0.876, "previous_close": 0.60,
+             "provider_ts": now - timedelta(hours=10)}
+    amq = {"bid": 0.90, "ask": 2.07, "provider_ts": now}   # ~79% spread book
+    f = compute_market_features(quote, [], [], amq, dict(DEFAULT_SETTINGS), et)
+    assert f["price"] == 0.876            # keeps last real print
+    assert f["price_indicative"] is False
+    assert f["quote_fresh"] is False

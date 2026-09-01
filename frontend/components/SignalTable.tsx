@@ -1,6 +1,7 @@
 'use client';
 import { fmtEtDate, fmtPct, fmtPrice } from '../lib/format';
 import type { SignalRow } from '../lib/types';
+import { TERMS } from '../lib/terms';
 import Score from './Score';
 
 export default function SignalTable({ rows, onSelect, compact }: {
@@ -18,9 +19,15 @@ export default function SignalTable({ rows, onSelect, compact }: {
     <div className="tbl-wrap">
       <table className="tbl">
         <thead><tr>
-          <th className="l">Symbol</th><th>Score</th><th>BUY Price</th><th>Current</th>
-          <th>Change</th><th>Day Hi/Lo</th><th>Since Hi/Lo</th>
-          <th>Max Gain</th><th>Max DD</th>
+          <th className="l" title={TERMS.signal_type}>Symbol</th>
+          <th title={TERMS.score}>Score</th>
+          <th title={TERMS.buy_price}>Found @</th>
+          <th title={TERMS.current}>Current</th>
+          <th title={TERMS.change}>Change</th>
+          <th title={TERMS.day_hilo}>Day Hi/Lo</th>
+          <th title={TERMS.since_hilo}>Since Hi/Lo</th>
+          <th title={TERMS.max_gain}>Max Gain</th>
+          <th title={TERMS.max_dd}>Max DD</th>
           {!compact && <th className="l">Catalyst</th>}
           <th className="l">Initiated</th><th className="l">Status</th>
         </tr></thead>
@@ -31,6 +38,9 @@ export default function SignalTable({ rows, onSelect, compact }: {
               <tr key={s.signal_uid} onClick={() => onSelect(s)} tabIndex={0} role="button"
                   onKeyDown={(e) => e.key === 'Enter' && onSelect(s)}>
                 <td className="l"><span className="sym">{s.symbol}</span>
+                  <span className={`badge ${s.signal_type === 'watch' ? 'early' : 'buy'}`}
+                        style={{ marginLeft: 6 }}
+                        title={TERMS.signal_type}>{s.signal_type === 'watch' ? 'WATCH' : 'BUY'}</span>
                   {s.is_demo && <span className="badge warn" style={{ marginLeft: 6 }}>DEMO</span>}</td>
                 <td><Score v={s.score} /></td>
                 <td title={`Immutable initiation price · ${s.price_source}`}><b>{fmtPrice(s.buy_price)}</b></td>

@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from 'react';
 import CandidateTable from '../components/CandidateTable';
 import RadarTable, { type RadarRow } from '../components/RadarTable';
+import SessionStrip from '../components/SessionStrip';
 import DetailDrawer from '../components/DetailDrawer';
 import SignalTable from '../components/SignalTable';
 import { useEventStream, usePolling } from '../lib/api';
@@ -57,6 +58,7 @@ export default function Dashboard() {
 
   return (
     <>
+      <SessionStrip confirmAt="07:00" />
       <div className="cards">
         <div className={`card ${sigRows.length ? 'glow-buy' : ''}`}>
           <h3>Active BUY Signals</h3>

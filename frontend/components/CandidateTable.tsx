@@ -2,25 +2,27 @@
 import { useMemo, useState } from 'react';
 import { fmtCompact, fmtNum, fmtPct, fmtPrice } from '../lib/format';
 import type { CandidateRow } from '../lib/types';
+import { TERMS } from '../lib/terms';
 import Freshness from './Freshness';
 import Score from './Score';
 
 type SortKey = keyof CandidateRow | 'score';
 
-const COLS: { key: SortKey; label: string; left?: boolean }[] = [
+const COLS: { key: SortKey; label: string; left?: boolean; tip?: string }[] = [
   { key: 'symbol', label: 'Symbol', left: true },
-  { key: 'score', label: 'Score' },
-  { key: 'price', label: 'Price' },
-  { key: 'gap_pct', label: 'Gap%' },
-  { key: 'rvol', label: 'RVOL' },
-  { key: 'pm_volume', label: 'PM Vol' },
-  { key: 'pm_dollar_volume', label: 'PM $Vol' },
-  { key: 'float_shares', label: 'Float' },
-  { key: 'market_cap', label: 'Mkt Cap' },
-  { key: 'spread_pct', label: 'Spread' },
-  { key: 'catalyst_type', label: 'Catalyst', left: true },
-  { key: 'filing_forms', label: 'Filings', left: true },
-  { key: 'hard_blocks', label: 'Status', left: true },
+  { key: 'score', label: 'Score', tip: TERMS.score },
+  { key: 'price', label: 'Price', tip: TERMS.price },
+  { key: 'gap_pct', label: 'Gap%', tip: TERMS.gap },
+  { key: 'rvol', label: 'RVOL', tip: TERMS.rvol },
+  { key: 'pm_volume', label: 'PM Vol', tip: TERMS.pm_vol },
+  { key: 'pm_dollar_volume', label: 'PM $Vol', tip: TERMS.pm_dvol },
+  { key: 'float_shares', label: 'Float', tip: TERMS.float },
+  { key: 'float_rotation' as SortKey, label: 'Rot%', tip: TERMS.float_rot },
+  { key: 'market_cap', label: 'Mkt Cap', tip: TERMS.mkt_cap },
+  { key: 'spread_pct', label: 'Spread', tip: TERMS.spread },
+  { key: 'catalyst_type', label: 'Catalyst', left: true, tip: TERMS.catalyst },
+  { key: 'filing_forms', label: 'Filings', left: true, tip: TERMS.filings },
+  { key: 'hard_blocks', label: 'Status', left: true, tip: TERMS.status },
 ];
 
 export default function CandidateTable({ rows, updatedSyms, onSelect }: {
@@ -73,6 +75,7 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
           <thead><tr>
             {COLS.map((c) => (
               <th key={String(c.key)} className={c.left ? 'l' : ''} onClick={() => click(c.key)}
+                  title={c.tip}
                   aria-sort={sort === c.key ? (dir === 1 ? 'ascending' : 'descending') : undefined}>
                 {c.label}{sort === c.key ? (dir === 1 ? ' ▲' : ' ▼') : ''}
               </th>
@@ -96,7 +99,8 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
                 <td>{r.rvol != null ? <>{fmtNum(r.rvol, 1)}x {r.rvol_estimated && <span className="badge est" title="Estimated vs avg daily volume curve — baseline history still accumulating">EST</span>}</> : <span className="faint" title="Baseline coverage insufficient">—</span>}</td>
                 <td>{fmtCompact(r.pm_volume)}</td>
                 <td>{r.pm_dollar_volume != null ? '$' + fmtCompact(r.pm_dollar_volume) : '—'}</td>
-                <td>{fmtCompact(r.float_shares)}</td>
+                <td>{fmtCompact(r.float_shares)}{r.float_shares != null && r.float_shares < 10_000_000 && <span className="badge lowfloat" title="Float under 10M shares — prone to explosive moves">LOW</span>}</td>
+                <td className={(r as any).float_rotation >= 0.2 ? 'pos' : ''}>{(r as any).float_rotation != null ? ((r as any).float_rotation * 100).toFixed(1) + '%' : '—'}</td>
                 <td>{r.market_cap != null ? '$' + fmtCompact(r.market_cap) : '—'}</td>
                 <td className={r.spread_pct != null && r.spread_pct > 5 ? 'neg' : ''}>{fmtPct(r.spread_pct, false)}</td>
                 <td className="l">

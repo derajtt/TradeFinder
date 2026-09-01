@@ -249,7 +249,9 @@ async def persist_reference(db: AsyncSession, symbol: str, profile: Optional[dic
         sector=(profile or {}).get("sector", "")[:128],
         industry=(profile or {}).get("industry", "")[:128],
         country=(profile or {}).get("country", "")[:64],
-        payload={"profile": {k: v for k, v in (profile or {}).items() if k != "description"},
+        payload={"profile": {**{k: v for k, v in (profile or {}).items()
+                              if k != "description"},
+                              "description": ((profile or {}).get("description") or "")[:700]},
                  "float": float_data or {}}))
     await db.flush()
 
@@ -317,10 +319,14 @@ def compute_market_features(quote: dict, today_pm: List[dict], baselines: List[f
     if not fresh and book_fresh:
         bid, ask = (amq or {}).get("bid"), (amq or {}).get("ask")
         if bid and ask and ask >= bid > 0:
-            # stale trade print but live book: display the indicative mid,
-            # clearly labeled. BUY still requires a fresh trade (quote_fresh stays False).
-            price = (bid + ask) / 2.0
-            price_indicative = True
+            mid = (bid + ask) / 2.0
+            book_spread = (ask - bid) / mid * 100.0
+            # Only trust the mid when the book is reasonably tight — a wide or
+            # one-sided 4 AM book produces meaningless mids. Otherwise keep the
+            # last real print (shown stale). BUY still requires a fresh trade.
+            if book_spread <= 15.0:
+                price = mid
+                price_indicative = True
     provider_ts = trade_ts if fresh else (book_ts or trade_ts)
 
     in_premarket = 240 <= cur_minute < 570

@@ -91,3 +91,13 @@ async def test_rejects_bad_close_price(db):
     await svc.record_close_checkpoint(db, sig, -1)
     cps = (await db.execute(select(SignalPriceCheckpoint))).scalars().all()
     assert len(cps) == 0
+
+
+async def test_watch_signal_type_recorded(db):
+    sig = await make(db, signal_type="watch")
+    assert sig is not None and sig.signal_type == "watch"
+    # a later full BUY on the same catalyst is NOT blocked by the watch record
+    sig.catalyst_fingerprint = "watch:" + sig.catalyst_fingerprint[:10]
+    await db.commit()
+    buy = await make(db)     # default type buy, original fingerprint
+    assert buy is not None and buy.signal_type == "buy"
