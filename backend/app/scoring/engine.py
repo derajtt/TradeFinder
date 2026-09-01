@@ -230,9 +230,41 @@ def score_candidate(f: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
     }
     buy = all(gates.values())
 
+    min_rvol = (s.get("min_rvol_for_buy") or 3.0)
+    rvol_req = min_rvol * ((s.get("est_rvol_buy_multiplier") or 1.5) if f.get("rvol_estimated") else 1.0)
+    explain = [
+        {"key": "score", "label": "Score", "pass": gates["score_gate"],
+         "actual": round(score, 1), "required": f">= {s.get('min_score_for_buy') or 75}"},
+        {"key": "catalyst", "label": "Verified catalyst", "pass": gates["catalyst_gate"],
+         "actual": (f"{direction or 'none'}, {novelty or '-'}, conf {confidence:.2f}"
+                    if cat else "none identified"),
+         "required": f"positive + new/update, conf >= {s.get('min_catalyst_confidence') or 0.6}, source link"},
+        {"key": "rvol", "label": "Premarket RVOL" + (" (est)" if f.get("rvol_estimated") else ""),
+         "pass": gates["rvol_gate"],
+         "actual": (f"{rvol:.1f}x" if rvol is not None else "no baseline yet"),
+         "required": f">= {rvol_req:.1f}x"},
+        {"key": "pm_volume", "label": "Premarket volume", "pass": (f.get("pm_volume") or 0) >= (s.get("min_pm_volume") or 0),
+         "actual": f.get("pm_volume"), "required": f">= {int(s.get('min_pm_volume') or 0):,}"},
+        {"key": "pm_dollar", "label": "Premarket $ volume", "pass": (f.get("pm_dollar_volume") or 0) >= (s.get("min_pm_dollar_volume") or 0),
+         "actual": f.get("pm_dollar_volume"), "required": f">= ${int(s.get('min_pm_dollar_volume') or 0):,}"},
+        {"key": "fresh", "label": "Fresh trade quote", "pass": gates["freshness_gate"],
+         "actual": "fresh" if f.get("quote_fresh") else "no fresh trade print",
+         "required": f"trade within {int(s.get('quote_freshness_sec') or 120)}s"},
+        {"key": "spread", "label": "Spread", "pass": gates["spread_gate"],
+         "actual": (f"{spread:.1f}%" if spread is not None else "unknown"),
+         "required": f"<= {s.get('max_spread_pct') or 5}%"},
+        {"key": "confirm", "label": "Price confirmation", "pass": gates["price_confirmation_gate"],
+         "actual": ("above VWAP" if above_vwap else "below VWAP" if above_vwap is False else "VWAP n/a"),
+         "required": "holding above VWAP, not overextended"},
+        {"key": "blocks", "label": "No hard blocks", "pass": not hard_blocks,
+         "actual": (", ".join(b.replace("_", " ") for b in hard_blocks) or "none"),
+         "required": "none"},
+    ]
+
     return {
         "strategy_version": STRATEGY_VERSION,
         "score": round(score, 2),
+        "explain": explain,
         "components": {k: round(v, 2) for k, v in comp.items()},
         "penalties": penalties,
         "hard_blocks": hard_blocks,

@@ -192,7 +192,7 @@ class FmpProvider:
         """Extended-hours bid/ask if entitled; returns None on failure."""
         try:
             data = await self._get("aftermarket-quote", {"symbol": symbol},
-                                   cache_ttl=20, endpoint_name="aftermarket-quote")
+                                   cache_ttl=45, endpoint_name="aftermarket-quote")
             row = data[0] if isinstance(data, list) and data else data if isinstance(data, dict) else None
             if not row:
                 return None

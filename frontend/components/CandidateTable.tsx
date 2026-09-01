@@ -88,7 +88,8 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
                   <div className="sym">{r.symbol} {r.buy && <span className="badge buy">BUY</span>}</div>
                   <div className="co-name">{r.name}</div>
                 </td>
-                <td><Score v={r.score} /></td>
+                <td title={Object.entries(r.components || {}).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join('\n') + (r.penalties?.length ? '\npenalties: ' + r.penalties.map((p) => `${p.type} ${p.points}`).join(', ') : '')}>
+                  <Score v={r.score} /></td>
                 <td title={r.price_indicative ? 'Indicative bid/ask mid — no fresh trade print yet; BUY stays blocked until one prints' : undefined}>
                   {r.price_indicative ? '~' : ''}{fmtPrice(r.price)} <Freshness ts={r.provider_ts} fresh={r.quote_fresh || r.price_indicative} /></td>
                 <td className={(r.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'}>{fmtPct(r.gap_pct)}</td>
@@ -104,13 +105,16 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
                     : <span className="faint">none</span>}
                 </td>
                 <td className="l faint" style={{ fontSize: 11 }}>{r.filing_forms?.slice(0, 3).join(' · ') || '—'}</td>
-                <td className="l">
+                <td className="l" style={{ maxWidth: 200 }}>
                   {r.hard_blocks?.length
-                    ? <span className="badge risk" title={r.hard_blocks.join(', ')}>blocked</span>
+                    ? <span className="badge risk" title={'Hard blocks (BUY impossible): ' + r.hard_blocks.join(', ')}>blocked</span>
                     : r.gates_failed?.length
-                      ? <span className="badge warn" title={r.gates_failed.join(', ')}>gated</span>
+                      ? <span className="badge warn" title={(r.gate_reasons ?? r.gates_failed).join('\n')}>gated</span>
                       : r.buy ? <span className="badge buy">qualified</span>
                       : <span className="badge neutral">watching</span>}
+                  {(r.gate_reasons?.length || r.hard_blocks?.length) ? (
+                    <div className="gate-why">{(r.hard_blocks?.length ? r.hard_blocks.map((b) => b.replace(/_/g, ' ')) : r.gate_reasons)?.slice(0, 2).join(' · ')}</div>
+                  ) : null}
                 </td>
               </tr>
             ))}

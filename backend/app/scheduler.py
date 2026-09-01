@@ -41,6 +41,8 @@ class Scheduler:
         self.scan_enabled = scan_enabled
         self.acc = barmod.Accumulator()
         self._split_cache: Dict[str, bool] = {}
+        self._last_shortlist: List[str] = []
+        self._pool_seen: Dict[str, float] = {}
         self.task: Optional[asyncio.Task] = None
         self.running = False
         self.state: Dict[str, Any] = {"phase": "idle", "last_cycle_at": None,
@@ -175,7 +177,18 @@ class Scheduler:
                    ((r["price"] >= pmin) and (pmax is None or r["price"] <= pmax))]
             # order by absolute move so quote spend goes to the strongest movers first
             pre.sort(key=lambda s: abs(pool[s].get("change_pct") or 0), reverse=True)
-            quotes = {q["symbol"]: q for q in await ctx.fmp.quotes(pre[:45])}
+            # API-spend control: full 45-symbol sweep every 5th cycle; between sweeps,
+            # re-quote only the working shortlist plus pool entrants not seen recently.
+            import time as _t
+            now_mono = _t.monotonic()
+            if self.state["cycles"] % 5 == 0:
+                quote_syms = pre[:45]
+            else:
+                fresh_entrants = [s for s in pre if now_mono - self._pool_seen.get(s, 0) > 600]
+                quote_syms = list(dict.fromkeys(self._last_shortlist + fresh_entrants))[:45]
+            for s_ in quote_syms:
+                self._pool_seen[s_] = now_mono
+            quotes = {q["symbol"]: q for q in await ctx.fmp.quotes(quote_syms)}
             if phase == "regular":
                 # regular hours: quote volume is the true day counter -> derive bars
                 async with SessionLocal() as db:
@@ -219,6 +232,7 @@ class Scheduler:
                 except Exception as e:
                     await self._health("warn", "enrich", f"{sym}: {type(e).__name__}: {e}")
             live_rows.sort(key=lambda r: r["score"], reverse=True)
+            self._last_shortlist = [r["symbol"] for r in live_rows]
             ctx.candidates_live = live_rows
             self.state["candidates"] = len(live_rows)
             self.state["last_cycle_ok"] = True
@@ -362,6 +376,27 @@ class Scheduler:
         if result["buy"] and not gates_failed:
             await self._maybe_fire_buy(sym, feats, result, catalyst, filings, session_date)
 
+        def _fmt_n(v):
+            if v is None: return "?"
+            v = float(v)
+            for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+                if abs(v) >= div: return f"{v/div:.1f}{suf}"
+            return f"{v:.0f}"
+        REASON = {
+            "price_range": lambda: f"price ${feats.get('price') or 0:.2f} outside ${settings.get('price_min') or 0:g}-{('$%g' % settings['price_max']) if settings.get('price_max') is not None else 'inf'}",
+            "market_cap_range": lambda: f"mkt cap ${_fmt_n(feats.get('market_cap'))} outside limits",
+            "float_range": lambda: f"float {_fmt_n(feats.get('float_shares'))} outside limits",
+            "shares_outstanding_range": lambda: f"shares out {_fmt_n(feats.get('shares_outstanding'))} outside limits",
+            "min_pm_volume": lambda: f"PM vol {_fmt_n(feats.get('pm_volume'))} < {_fmt_n(settings.get('min_pm_volume'))}",
+            "min_pm_dollar_volume": lambda: f"PM $vol ${_fmt_n(feats.get('pm_dollar_volume'))} < ${_fmt_n(settings.get('min_pm_dollar_volume'))}",
+        }
+        gate_reasons = []
+        for g in gates_failed:
+            try:
+                gate_reasons.append(REASON.get(g, lambda: g)())
+            except Exception:
+                gate_reasons.append(g)
+
         return {
             "symbol": sym, "name": (profile or {}).get("name") or quote.get("name", ""),
             "exchange": (profile or {}).get("exchange") or quote.get("exchange", ""),
@@ -380,6 +415,7 @@ class Scheduler:
             "catalyst_summary": (catalyst or {}).get("summary", ""),
             "filing_forms": feats["filing_context"].get("recent_forms", [])[:6],
             "hard_blocks": result["hard_blocks"], "gates_failed": gates_failed,
+            "gate_reasons": gate_reasons, "explain": result.get("explain", []),
             "gates": result["gates"], "components": result["components"],
             "penalties": result["penalties"],
             "quote_fresh": feats.get("quote_fresh"),

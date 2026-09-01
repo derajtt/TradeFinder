@@ -41,6 +41,13 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
     day_cut = datetime.now(timezone.utc) - timedelta(hours=24)
     api_24h = (await db.execute(select(func.count(ProviderRequest.id))
                                 .where(ProviderRequest.ts_utc >= day_cut))).scalar() or 0
+    five_cut = datetime.now(timezone.utc) - timedelta(minutes=5)
+    api_5m = (await db.execute(select(func.count(ProviderRequest.id))
+                               .where(ProviderRequest.ts_utc >= five_cut))).scalar() or 0
+    throttles_1h = (await db.execute(select(func.count(ProviderRequest.id))
+                                     .where(ProviderRequest.status_code == 429,
+                                            ProviderRequest.ts_utc >= datetime.now(timezone.utc) - timedelta(hours=1))
+                                     )).scalar() or 0
     active = (await db.execute(select(func.count(BuySignal.id))
                                .where(BuySignal.status == "active",
                                       BuySignal.is_demo == False))).scalar() or 0  # noqa: E712
@@ -50,6 +57,8 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
         "next_scan_start": next_scan_start().isoformat(),
         "active_signals": active,
         "api_calls_24h": api_24h,
+        "api_calls_per_min": round(api_5m / 5.0, 1),
+        "api_throttles_1h": throttles_1h,
         "ai_usage_month": {"calls": len(ai_rows),
                            "est_cost_usd": round(sum(r.est_cost_usd for r in ai_rows), 4)},
         "strategy_version": STRATEGY_VERSION,

@@ -35,7 +35,12 @@ export default function TopBar() {
       )}
       <span className="tb-item">Candidates <b>{s?.candidates ?? '—'}</b></span>
       <span className="tb-item">Active BUY <b style={{ color: 'var(--buy)' }}>{status?.active_signals ?? '—'}</b></span>
-      <span className="tb-item">API 24h <b>{status?.api_calls_24h ?? '—'}</b></span>
+      <span className="tb-item" title="Provider calls per minute (5-min avg) — FMP allows 300/min. Throttles = HTTP 429s in the last hour.">
+        API <b>{status?.api_calls_per_min ?? '—'}/min</b>
+        {(status?.api_throttles_1h ?? 0) > 0
+          ? <span className="badge risk">{status?.api_throttles_1h} throttled</span>
+          : <span className="fresh ok">● no throttles</span>}
+      </span>
       <span className="tb-item">AI mo. <b>${status?.ai_usage_month?.est_cost_usd?.toFixed(2) ?? '—'}</b></span>
       <span className="tb-item faint">{status?.strategy_version}</span>
     </header>

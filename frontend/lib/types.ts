@@ -10,6 +10,8 @@ export interface CandidateRow {
   catalyst_type: string; catalyst_direction: string; catalyst_summary: string;
   filing_forms: string[]; hard_blocks: string[]; gates_failed: string[];
   gates: Record<string, boolean>; components: Record<string, number>;
+  gate_reasons?: string[];
+  explain?: { key: string; label: string; pass: boolean; actual: string | number | null; required: string }[];
   penalties: { type: string; points: number }[];
   quote_fresh: boolean | null; provider_ts: string | null;
   sector: string; ts: string;
@@ -38,6 +40,7 @@ export interface StatusPayload {
   next_scan_start: string; active_signals: number; api_calls_24h: number;
   ai_usage_month: { calls: number; est_cost_usd: number };
   strategy_version: string; paper_mode: boolean;
+  api_calls_per_min?: number; api_throttles_1h?: number;
 }
 
 export interface AppSettings {

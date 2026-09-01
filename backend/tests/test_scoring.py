@@ -173,3 +173,16 @@ def test_estimated_rvol_disallowed_by_setting():
     st["allow_estimated_rvol"] = False
     r = score_candidate(f, st)
     assert r["gates"]["rvol_gate"] is False
+
+
+def test_explain_present_and_accurate():
+    r = score_candidate(copy.deepcopy(GOOD), s())
+    ex = {e["key"]: e for e in r["explain"]}
+    assert set(ex) >= {"score", "catalyst", "rvol", "pm_volume", "pm_dollar",
+                       "fresh", "spread", "confirm", "blocks"}
+    assert all(e["pass"] for e in r["explain"])           # strong candidate: all green
+    f = copy.deepcopy(GOOD)
+    f["rvol"] = 1.0
+    ex2 = {e["key"]: e for e in score_candidate(f, s())["explain"]}
+    assert ex2["rvol"]["pass"] is False
+    assert "1.0x" in ex2["rvol"]["actual"]

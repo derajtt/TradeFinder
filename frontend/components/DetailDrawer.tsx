@@ -4,6 +4,7 @@ import { apiGet } from '../lib/api';
 import { fmtCompact, fmtEtDate, fmtNum, fmtPct, fmtPrice } from '../lib/format';
 import Chart, { type Bar } from './Chart';
 import Score from './Score';
+import ScoringLegend from './ScoringLegend';
 
 interface Detail {
   symbol: string;
@@ -99,8 +100,24 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
           <Chart bars={d.bars} buyPrice={sig?.buy_price} vwap={feats.vwap}
                  pmHigh={feats.pm_high} pmLow={feats.pm_low} />
 
+          {(live?.explain?.length || scoreDetail?.explain?.length) ? (<>
+            <div className="subhead">Path to BUY — every row must pass</div>
+            <div className="timeline">
+              {(live?.explain ?? scoreDetail?.explain ?? []).map((e: any) => (
+                <div className="gate buypath" key={e.key}>
+                  <span className={e.pass ? 'g-ok' : 'g-no'} style={{ width: 40 }}>{e.pass ? 'PASS' : 'FAIL'}</span>
+                  <span style={{ flex: 1 }}>{e.label}</span>
+                  <span className="dim" style={{ fontFamily: 'var(--mono)', fontSize: 11.5 }}>
+                    {typeof e.actual === 'number' ? e.actual.toLocaleString('en-US', { maximumFractionDigits: 1 }) : String(e.actual ?? '—')}
+                    <span className="faint">  (need {e.required})</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>) : null}
+
           {scoreDetail && (<>
-            <div className="subhead">Score breakdown</div>
+            <div className="subhead">Score breakdown <ScoringLegend /></div>
             {Object.entries(scoreDetail.components ?? {}).map(([k, v]) => (
               <div className="bar-row" key={k}>
                 <span className="lbl">{k.replace(/_/g, ' ')}</span>

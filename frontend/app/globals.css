@@ -197,3 +197,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
   .cards { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } }
+
+/* gate reasons + buy path */
+.gate-why { font-size: 10.5px; color: var(--warn); margin-top: 3px; line-height: 1.35; white-space: normal; font-family: var(--sans); }
+.gate.buypath { display: flex; gap: 12px; align-items: center; }
