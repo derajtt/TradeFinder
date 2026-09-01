@@ -32,6 +32,45 @@ To keep the site permanently live on macOS (start at login, restart on crash):
 - **No Docker** → local venv + Node processes with SQLite (identical code paths; SQLAlchemy
   swaps the engine via `DATABASE_URL`).
 
+## v2 architecture (September 2026 rebuild)
+
+**Canonical analytics** — every displayed total (dashboard, CSV, API, reports) comes
+from one source: `backend/app/analytics.py::canonical_report`. Counts always reconcile.
+
+**Lifecycle** — each candidate has exactly one status: DISCOVERED → EARLY_WATCH
+(pre-7:00, non-actionable) / QUALIFIED_WATCH / ACTIONABLE_BUY (7:00–9:20 only) /
+REJECTED (reason + shadow-tracked) / INVALIDATED / EXPIRED / CLOSED / DATA_ERROR.
+
+**Executable pricing** — signals store bid/ask/sizes/spread at signal time; simulated
+buys fill at ask+slippage, exits at bid−slippage; no-fill reasons recorded. Records
+found before 7:00 are judged from their first actionable quote after 7:00.
+
+**Hard gates vs score** — `strategy/gates.py`: window, tier, Grade-A/B fresh catalyst
+(enum extraction, deterministic point maps — a 1–3 scale can never leak into 0–100),
+credible source, fresh quotes, tier spread caps, quoted liquidity, dollar-volume,
+sustained participation, rotation zones, extension, dilution engine, halt, defined
+entry setup with invalidation + R multiple, data health. Score ranks gate-passers only.
+
+**Price tiers** — $0.10–0.25 / 0.25–0.50 / 0.50–1 / 1–2.50 / 2.50–5; the penny tier
+demands a Grade-A catalyst, tighter spreads, more liquidity.
+
+**Paper trading** — frozen primary policy (partial at 1R → breakeven stop, 2R target,
+time ladder to a 10:30 hard exit) + 14 shadow exit policies on identical signals.
+
+**Backtester** (`backend/app/bt/`, runner `scripts/backtest_run.py`) — chronological
+5-minute replay (1-min history is not in the FMP plan; premarket bars from 4:00 AM
+verified), SEC-filing-timestamped discovery (no lookahead, no survivorship cherry-pick),
+cached data layer, optimistic/baseline/pessimistic execution, AMBIGUOUS both-touch
+handling, bounded staged optimization with predefined convergence + accuracy floors,
+Wilson lower-bound win-rate ranking, walk-forward folds, one-look untouched holdout,
+exit-strategy tournament + MFE decay, PBO estimate. Honest labels for current-only
+fields (float ⇒ rotation is ESTIMATED_CURRENT_FLOAT).
+
+**Nightly research** — after the close the droplet replays the completed day, updates
+challenger stats, and audit-logs a promotion decision. Auto-promotion is hard-gated
+(≥100 forward paper trades among predefined requirements); no strategy changes during
+market hours; rollback audit preserved.
+
 ## Architecture
 
 ```

@@ -14,10 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_config
 from ..db import get_session
-from ..models import (AiUsage, BuySignal, Candidate, CandidateFeatureSnapshot,
-                      Catalyst, HealthEvent, NewsItem, ProviderRequest, ScannerRun,
-                      SecFiling, SignalEvent, SignalPriceCheckpoint, Symbol,
-                      SymbolReferenceVersion)
+from ..models import (AiUsage, BtJob, BuySignal, Candidate,
+                      CandidateFeatureSnapshot, Catalyst, HealthEvent, NewsItem,
+                      PaperPosition, ProviderRequest, RejectedCandidate,
+                      ScannerRun, SecFiling, ShadowExit, SignalEvent,
+                      SignalPriceCheckpoint, Symbol, SymbolReferenceVersion)
+from ..analytics import canonical_report, effective_lifecycle
 from ..scoring.engine import DEFAULT_SETTINGS, STRATEGY_VERSION
 from ..settings_service import get_settings, update_settings
 from ..signals.service import metrics_with_outcome, signal_metrics
@@ -430,3 +432,67 @@ async def stream(request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+@router.get("/report/canonical")
+async def report_canonical(db: AsyncSession = Depends(get_session)):
+    """THE single source for every displayed total."""
+    return await canonical_report(db, await _get_settings(db))
+
+
+@router.get("/rejected")
+async def rejected(limit: int = 100, db: AsyncSession = Depends(get_session)):
+    rows = (await db.execute(select(RejectedCandidate)
+                             .order_by(desc(RejectedCandidate.id))
+                             .limit(min(limit, 400)))).scalars().all()
+    return {"rows": [{
+        "symbol": r.symbol, "session_date": r.session_date,
+        "rejected_at": r.rejected_at.isoformat(), "lifecycle": r.lifecycle,
+        "reason": r.rejection_reason, "failed_gates": r.failed_gates,
+        "price": r.price_at_reject, "score": r.score,
+        "shadow_high": r.shadow_high, "shadow_low": r.shadow_low,
+        "shadow_last": r.shadow_last,
+        "missed_move_pct": (round((r.shadow_high - r.price_at_reject)
+                                  / r.price_at_reject * 100, 2)
+                            if r.shadow_high and r.price_at_reject else None),
+    } for r in rows]}
+
+
+@router.get("/positions")
+async def positions(db: AsyncSession = Depends(get_session)):
+    rows = (await db.execute(select(PaperPosition)
+                             .order_by(desc(PaperPosition.id)).limit(200)
+                             )).scalars().all()
+    return {"rows": [{
+        "symbol": p.symbol, "status": p.status, "opened_at": p.opened_at.isoformat(),
+        "entry_fill": p.entry_fill, "stop": p.stop, "target1": p.target1,
+        "target2": p.target2, "size_usd": p.size_usd,
+        "remaining_frac": p.remaining_frac, "realized_r": p.realized_r,
+        "exit_reason": p.exit_reason,
+        "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+        "strategy_version": p.strategy_version, "events": (p.events or [])[-8:],
+    } for p in rows]}
+
+
+@router.post("/backtest/import")
+async def backtest_import(payload: Dict[str, Any],
+                          db: AsyncSession = Depends(get_session)):
+    """The local runner posts its final artifacts here for the dashboard."""
+    job = BtJob(kind=str(payload.get("kind", "replay"))[:24],
+                config=payload.get("config") or {},
+                config_hash=str(payload.get("config_hash", ""))[:64],
+                status="done", result=payload.get("result") or {})
+    db.add(job)
+    await db.commit()
+    return {"ok": True, "job_id": job.id}
+
+
+@router.get("/backtest/report")
+async def backtest_report(db: AsyncSession = Depends(get_session)):
+    job = (await db.execute(select(BtJob).where(BtJob.status == "done")
+                            .order_by(desc(BtJob.id)).limit(1))).scalar_one_or_none()
+    if not job:
+        return {"available": False,
+                "note": "No backtest imported yet. Run backend/scripts/backtest_run.py."}
+    return {"available": True, "created_at": job.created_at.isoformat(),
+            "kind": job.kind, "config_hash": job.config_hash, "result": job.result}

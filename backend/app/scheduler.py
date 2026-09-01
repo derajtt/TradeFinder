@@ -18,12 +18,17 @@ from sqlalchemy import select
 
 from .db import SessionLocal
 from .models import (BuySignal, Candidate, CandidateFeatureSnapshot, HealthEvent,
-                     ProviderRequest, ScannerRun, SecFiling)
+                     ProviderRequest, RejectedCandidate, ScannerRun, SecFiling)
 from .providers.fmp import looks_common_stock
 from .providers.fmp import EntitlementError
 from .scanner import bars as barmod
 from .scanner import funnel
 from .scoring.engine import STRATEGY_VERSION, score_candidate, universe_gates
+from .strategy import paper as paper_engine
+from .strategy.dilution import assess as assess_dilution
+from .strategy.gates import evaluate as evaluate_v2
+from .strategy.tiers import tier_for
+from .strategy.versions import VERSIONS
 from .settings_service import ensure_strategy_version, get_settings
 from .signals import service as sigsvc
 from .sse import broadcaster
@@ -48,6 +53,7 @@ class Scheduler:
         self._universe_ts: float = 0.0
         self._sweep_idx: int = 0
         self._news_quoted: Dict[str, float] = {}
+        self._first_seen: Dict[str, str] = {}   # f"{sym}:{date}" -> iso ts
         self.task: Optional[asyncio.Task] = None
         self.running = False
         self.state: Dict[str, Any] = {"phase": "idle", "last_cycle_at": None,
@@ -115,6 +121,7 @@ class Scheduler:
                         await self._discovery_cycle(settings, phase)  # keep candidate table fresh
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
+                    await self._nightly_research(settings)
                     interval = max(interval, 300)
                 else:
                     nxt = next_scan_start()
@@ -478,6 +485,20 @@ class Scheduler:
         feats["session_phase"] = session_phase()
         feats["et_minutes"] = t_et.hour * 60 + t_et.minute
         result = score_candidate(feats, settings)
+        # ── v2 decision engine (lifecycle, hard gates, executable pricing) ──
+        feats["bid"] = (amq or {}).get("bid")
+        feats["ask"] = (amq or {}).get("ask")
+        feats["bid_size"] = (amq or {}).get("bid_size")
+        feats["ask_size"] = (amq or {}).get("ask_size")
+        extraction = (catalyst or {}).get("extraction")
+        dilution = assess_dilution(filings, extraction,
+                                   feats.get("recent_reverse_split", False))
+        verdict = evaluate_v2(feats, extraction, dilution, settings, t_et)
+        fs_key = f"{sym}:{session_date}"
+        if fs_key not in self._first_seen:
+            self._first_seen[fs_key] = now_utc().isoformat()
+        await self._record_lifecycle(sym, session_date, feats, verdict, catalyst,
+                                     dilution, settings)
 
         async with SessionLocal() as db:
             cand = Candidate(run_id=run_id, symbol=sym, session_date=session_date,
@@ -493,9 +514,9 @@ class Scheduler:
                                             score_detail=result))
             await db.commit()
 
-        if result["buy"] and not gates_failed:
+        if False and result["buy"] and not gates_failed:  # superseded by v2 lifecycle
             await self._maybe_fire_buy(sym, feats, result, catalyst, filings, session_date)
-        elif (settings.get("watch_enabled", True)
+        elif False and (settings.get("watch_enabled", True)
               and result["score"] >= (settings.get("watch_score_min") or 50)
               and not result["hard_blocks"]
               and feats.get("quote_fresh")
@@ -657,6 +678,166 @@ class Scheduler:
                     "score": result["score"], "initiated_at": sig.initiated_at.isoformat(),
                     "signal_uid": sig.signal_uid})
 
+    async def _record_lifecycle(self, sym, session_date, feats, verdict, catalyst,
+                                dilution, settings):
+        """Persist the v2 decision: ACTIONABLE_BUY / EARLY_WATCH / QUALIFIED_WATCH
+        signals (immutable at signal time) and REJECTED shadow rows. Idempotent
+        per (symbol, day, lifecycle-kind)."""
+        from sqlalchemy import select as _sel
+        lc = verdict["lifecycle"]
+        news_items = self.ctx.news_by_symbol.get(sym, [])
+        cat_pub = min((n["published_at"] for n in news_items
+                       if n.get("published_at")), default=None)
+        if lc in ("ACTIONABLE_BUY", "EARLY_WATCH") or                 (lc == "REJECTED" and verdict["score"] >=
+                 (settings.get("watch_score_min") or 50)):
+            sig_type = "buy" if lc == "ACTIONABLE_BUY" else "watch"
+            lc_store = lc if lc != "REJECTED" else "QUALIFIED_WATCH"
+            fp = f"v2:{lc_store}"
+            async with SessionLocal() as db:
+                if not await sigsvc.recent_signal_exists(db, sym, session_date,
+                                                         STRATEGY_VERSION, fp):
+                    fill = verdict["fill"]
+                    price_basis = (fill.get("fill_price") if lc == "ACTIONABLE_BUY"
+                                   and fill.get("filled") else feats.get("price"))
+                    sig = await sigsvc.create_buy_signal(
+                        db, symbol=sym, session_date=session_date,
+                        strategy_version=STRATEGY_VERSION,
+                        price=price_basis or feats.get("price") or 0.0,
+                        price_source="fmp:premarket-tape+book",
+                        provider_ts=None,
+                        score_snapshot={"v2": {k: verdict[k] for k in
+                                        ("score", "score_components", "gates",
+                                         "setup", "tier", "catalyst_grade",
+                                         "rotation_zone")},
+                                        "score": verdict["score"],
+                                        "components": verdict["score_components"],
+                                        "strategy_version": STRATEGY_VERSION},
+                        evidence_snapshot={"catalyst": catalyst,
+                                           "dilution": dilution,
+                                           "features": {k: feats.get(k) for k in
+                                            ("price", "bid", "ask", "gap_pct",
+                                             "pm_volume", "pm_dollar_volume",
+                                             "float_shares", "float_rotation",
+                                             "vwap", "spread_pct")}},
+                        signal_type=sig_type)
+                    if sig:
+                        sig.catalyst_fingerprint = fp
+                        sig.lifecycle = lc_store
+                        sig.price_tier = verdict.get("tier") or ""
+                        sig.versions = VERSIONS
+                        sig.executable = bool(fill.get("filled")) and lc == "ACTIONABLE_BUY"
+                        sig.data_quality = "complete" if feats.get("quote_fresh") else "stale"
+                        sig.sig_bid = feats.get("bid")
+                        sig.sig_ask = feats.get("ask")
+                        sig.sig_bid_size = feats.get("bid_size")
+                        sig.sig_ask_size = feats.get("ask_size")
+                        sig.sig_spread_pct = feats.get("spread_pct")
+                        sig.proposed_entry = verdict["setup"].get("entry")
+                        sig.sim_fill_price = fill.get("fill_price")
+                        sig.no_fill_reason = fill.get("no_fill_reason") or ""
+                        sig.catalyst_published_at = cat_pub
+                        fs = self._first_seen.get(f"{sym}:{session_date}")
+                        from datetime import datetime as _dt
+                        sig.detected_at = _dt.fromisoformat(fs) if fs else now_utc()
+                        sig.first_pass_at = now_utc()
+                        if lc == "ACTIONABLE_BUY":
+                            sig.first_actionable_quote_at = now_utc()
+                            sig.first_actionable_ask = feats.get("ask")
+                            await paper_engine.open_position(db, sig, verdict["setup"])
+                        await db.commit()
+                        await self._health("info", "signals",
+                                           f"{lc_store} {sym} @ {price_basis} "
+                                           f"(score {verdict['score']})")
+                        await broadcaster.publish("buy_signal", {
+                            "symbol": sym, "price": price_basis,
+                            "type": sig_type, "lifecycle": lc_store,
+                            "score": verdict["score"],
+                            "initiated_at": sig.initiated_at.isoformat(),
+                            "signal_uid": sig.signal_uid})
+        if lc in ("REJECTED", "EXPIRED"):
+            async with SessionLocal() as db:
+                exists = (await db.execute(_sel(RejectedCandidate.id).where(
+                    RejectedCandidate.symbol == sym,
+                    RejectedCandidate.session_date == session_date))).first()
+                if not exists:
+                    db.add(RejectedCandidate(
+                        symbol=sym, session_date=session_date, lifecycle=lc,
+                        rejection_reason=(verdict.get("rejection_reason") or "")[:2000],
+                        failed_gates=[g["gate"] for g in verdict["gates"]
+                                      if not g["pass"]],
+                        price_at_reject=feats.get("price"),
+                        score=verdict["score"],
+                        snapshot={"features": {k: feats.get(k) for k in
+                                  ("price", "gap_pct", "pm_dollar_volume",
+                                   "float_rotation", "spread_pct", "vwap")},
+                                  "gates": verdict["gates"]},
+                        versions=VERSIONS,
+                        shadow_until=now_utc() + timedelta(hours=8)))
+                    await db.commit()
+
+    async def _nightly_research(self, settings):
+        """After-close research: replay the completed day through the frozen
+        engine, update challenger stats, and audit-log the promotion decision.
+        Auto-promotion is hard-gated on predefined requirements (>=100 forward
+        paper trades among them) — until then every decision is 'hold' with the
+        evidence recorded. Never changes the primary strategy during hours."""
+        from sqlalchemy import select as _sel
+        from .models import BtJob
+        t = now_et()
+        if t.hour < 20 or not is_trading_day(t.date()):
+            return
+        d = str(t.date())
+        async with SessionLocal() as db:
+            done = (await db.execute(_sel(BtJob.id).where(
+                BtJob.kind == "nightly", BtJob.config_hash == d))).first()
+            if done:
+                return
+            job = BtJob(kind="nightly", config={"date": d}, config_hash=d,
+                        status="running")
+            db.add(job)
+            await db.commit()
+            job_id = job.id
+        try:
+            from .bt.data import BtData
+            from .bt.replay import SessionReplay
+            data = BtData(SessionLocal, rps=1.5)
+            rp = SessionReplay(data, ai_client=None, cfg={"cand_cap": 15})
+            res = await rp.run_session(d, {**settings,
+                                           "max_ext_above_vwap_pct": 20.0,
+                                           "rotation_hard_cap": 1.0})
+            await data.close()
+            async with SessionLocal() as db:
+                from .signals.service import metrics_with_outcome
+                paper_n = len((await db.execute(_sel(BuySignal).where(
+                    BuySignal.lifecycle == "ACTIONABLE_BUY",
+                    BuySignal.is_demo == False))).scalars().all())  # noqa: E712
+                promo = {"decision": "hold",
+                         "reason": (f"forward paper sample {paper_n}/100 below "
+                                    "predefined promotion minimum"),
+                         "requirements": {"min_forward_trades": 100,
+                                          "better_reliable_wr": None,
+                                          "positive_expectancy": None},
+                         "audit": "no automatic strategy change; rollback n/a"}
+                job = await db.get(BtJob, job_id)
+                job.status = "done"
+                job.result = {"replay": {"date": d,
+                                          "candidates": len(res["candidates"]),
+                                          "signals": len(res["signals"]),
+                                          "early": len(res["early"]),
+                                          "rejects": len(res["rejects"])},
+                              "promotion": promo}
+                await db.commit()
+                await self._health("info", "research",
+                                   f"nightly replay {d}: {len(res['signals'])} "
+                                   f"signals, promotion=hold ({paper_n}/100 fwd)")
+        except Exception as e:
+            async with SessionLocal() as db:
+                job = await db.get(BtJob, job_id)
+                if job:
+                    job.status = "failed"
+                    job.error = f"{type(e).__name__}: {e}"[:500]
+                    await db.commit()
+
     # ---------------- tracking ----------------
     async def _tracking_cycle(self, settings: Dict[str, Any], finalize: bool):
         async with SessionLocal() as db:
@@ -681,6 +862,11 @@ class Scheduler:
                             if q_ts is None or amt["provider_ts"] > q_ts:
                                 quotes[sym_] = {**q, "price": amt["price"],
                                                 "provider_ts": amt["provider_ts"]}
+                        amq2 = await self.ctx.fmp.aftermarket_quote(sym_)
+                        if amq2:
+                            q = quotes.get(sym_) or {"symbol": sym_}
+                            quotes[sym_] = {**q, "bid": amq2.get("bid"),
+                                            "ask": amq2.get("ask")}
             except Exception as e:
                 await self._health("warn", "tracking", f"quote fetch failed: {e}")
                 return  # tracking failure must not alter signals
@@ -710,7 +896,30 @@ class Scheduler:
                                 "day_high": sig.day_high, "day_low": sig.day_low,
                                 "since_high": sig.since_signal_high,
                                 "since_low": sig.since_signal_low, **m})
+            try:
+                pos_updates = await paper_engine.update_positions(
+                    db, quotes, settings)
+            except Exception as e:
+                pos_updates = []
+                await self._health("warn", "paper", f"{type(e).__name__}: {e}")
+            # shadow-track today's rejected candidates (false-negative analysis)
+            try:
+                from sqlalchemy import select as _sel
+                rej = (await db.execute(_sel(RejectedCandidate).where(
+                    RejectedCandidate.shadow_until > now_utc()))).scalars().all()
+                for rc in rej:
+                    q = quotes.get(rc.symbol)
+                    if q and q.get("price"):
+                        px = q["price"]
+                        rc.shadow_last = px
+                        rc.shadow_high = max(rc.shadow_high or px, px)
+                        rc.shadow_low = min(rc.shadow_low or px, px)
+            except Exception:
+                pass
             await db.commit()
             if updates:
                 await broadcaster.publish("signals", {"rows": updates,
                                                       "ts": now_utc().isoformat()})
+            if pos_updates:
+                await broadcaster.publish("positions", {"rows": pos_updates,
+                                                        "ts": now_utc().isoformat()})

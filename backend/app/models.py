@@ -188,6 +188,31 @@ class BuySignal(Base):
     post_window_low: Mapped[float] = mapped_column(Float, nullable=True)   # 7:00 broker window opens
     status: Mapped[str] = mapped_column(String(16), default="active")  # active|closed|invalidated
     signal_type: Mapped[str] = mapped_column(String(8), default="buy")  # buy|watch
+    lifecycle: Mapped[str] = mapped_column(String(16), default="", index=True)  # v2 canonical status
+    price_tier: Mapped[str] = mapped_column(String(12), default="")
+    cohort: Mapped[str] = mapped_column(String(12), default="live_paper")
+    executable: Mapped[bool] = mapped_column(Boolean, default=False)
+    data_quality: Mapped[str] = mapped_column(String(12), default="complete")
+    versions: Mapped[dict] = mapped_column(JSON, default=dict)
+    sig_bid: Mapped[float] = mapped_column(Float, nullable=True)
+    sig_ask: Mapped[float] = mapped_column(Float, nullable=True)
+    sig_bid_size: Mapped[float] = mapped_column(Float, nullable=True)
+    sig_ask_size: Mapped[float] = mapped_column(Float, nullable=True)
+    sig_spread_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    proposed_entry: Mapped[float] = mapped_column(Float, nullable=True)
+    sim_fill_price: Mapped[float] = mapped_column(Float, nullable=True)
+    no_fill_reason: Mapped[str] = mapped_column(String(200), default="")
+    catalyst_published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    sec_accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_pass_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_actionable_quote_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_actionable_ask: Mapped[float] = mapped_column(Float, nullable=True)
+    mfe_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    mfe_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    mae_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    mae_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome_v2: Mapped[str] = mapped_column(String(12), default="")
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     __table_args__ = (
         UniqueConstraint("symbol", "strategy_version", "session_date", "catalyst_fingerprint",
@@ -264,3 +289,119 @@ class AiUsage(Base):
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class RejectedCandidate(Base):
+    """Shadow-tracked false-negative log: passed preliminary discovery, failed a
+    hard gate. Never converted retroactively into a signal."""
+    __tablename__ = "rejected_candidates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    session_date: Mapped[str] = mapped_column(String(10), index=True)
+    rejected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    lifecycle: Mapped[str] = mapped_column(String(16), default="REJECTED")
+    rejection_reason: Mapped[str] = mapped_column(Text, default="")
+    failed_gates: Mapped[list] = mapped_column(JSON, default=list)
+    price_at_reject: Mapped[float] = mapped_column(Float, nullable=True)
+    score: Mapped[float] = mapped_column(Float, nullable=True)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    versions: Mapped[dict] = mapped_column(JSON, default=dict)
+    shadow_high: Mapped[float] = mapped_column(Float, nullable=True)
+    shadow_low: Mapped[float] = mapped_column(Float, nullable=True)
+    shadow_last: Mapped[float] = mapped_column(Float, nullable=True)
+    shadow_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("ix_rej_sym_date", "symbol", "session_date"),)
+
+
+class PaperPosition(Base):
+    """Primary frozen paper policy execution for an ACTIONABLE_BUY signal."""
+    __tablename__ = "paper_positions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("buy_signals.id"), index=True, unique=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    strategy_version: Mapped[str] = mapped_column(String(16), default="")
+    entry_fill: Mapped[float] = mapped_column(Float)
+    stop: Mapped[float] = mapped_column(Float, nullable=True)
+    target1: Mapped[float] = mapped_column(Float, nullable=True)
+    target2: Mapped[float] = mapped_column(Float, nullable=True)
+    size_usd: Mapped[float] = mapped_column(Float, default=1000.0)
+    remaining_frac: Mapped[float] = mapped_column(Float, default=1.0)
+    realized_r: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    exit_reason: Mapped[str] = mapped_column(String(64), default="")
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_fill: Mapped[float] = mapped_column(Float, nullable=True)
+    events: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class ShadowExit(Base):
+    """Alternative exit policies evaluated on the same live signals (shadow only)."""
+    __tablename__ = "shadow_exits"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("buy_signals.id"), index=True)
+    policy: Mapped[str] = mapped_column(String(40), index=True)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    exited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    r_multiple: Mapped[float] = mapped_column(Float, nullable=True)
+    pct: Mapped[float] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    __table_args__ = (UniqueConstraint("signal_id", "policy", name="uq_shadow"),)
+
+
+class BtJob(Base):
+    """Durable, resumable backtest jobs. Never blocks the live scanner."""
+    __tablename__ = "bt_jobs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    kind: Mapped[str] = mapped_column(String(24), default="replay")
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    config_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    progress: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class BtSession(Base):
+    __tablename__ = "bt_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("bt_jobs.id"), index=True)
+    session_date: Mapped[str] = mapped_column(String(10), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="done")
+    universe_n: Mapped[int] = mapped_column(Integer, default=0)
+    candidates_n: Mapped[int] = mapped_column(Integer, default=0)
+    signals_n: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (UniqueConstraint("job_id", "session_date", name="uq_bt_sess"),)
+
+
+class BtTrade(Base):
+    """A simulated trade from replay, with a full audit trail including the
+    post-entry bar path (frozen basis for the exit tournament)."""
+    __tablename__ = "bt_trades"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("bt_jobs.id"), index=True)
+    session_date: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    signal_time: Mapped[str] = mapped_column(String(20), default="")
+    lifecycle: Mapped[str] = mapped_column(String(16), default="")
+    entry_model: Mapped[str] = mapped_column(String(12), default="baseline")
+    entry_price: Mapped[float] = mapped_column(Float, nullable=True)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str] = mapped_column(String(48), default="")
+    r_multiple: Mapped[float] = mapped_column(Float, nullable=True)
+    pct: Mapped[float] = mapped_column(Float, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(12), default="")
+    size_usd: Mapped[float] = mapped_column(Float, default=1000.0)
+    fill_ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    audit: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class BtCache(Base):
+    """Cached provider payloads for the backtester (bars, news, eod, docs)."""
+    __tablename__ = "bt_cache"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)

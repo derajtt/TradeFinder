@@ -7,11 +7,14 @@ const LINKS = [
   { href: '/signals', label: 'Signal History', ico: '◷' },
   { href: '/performance', label: 'Performance', ico: '◔' },
   { href: '/settings', label: 'Settings', ico: '⚙' },
+  { href: '/backtest', label: 'Backtesting', ico: '↺' },
+  { href: '/lab', label: 'Exit Lab', ico: '⚗' },
   { href: '/health', label: 'System Health', ico: '♥' },
 ] as const;
 
 const ICONS: Record<string, string> = {
   '/': '⌂', '/signals': '≣', '/performance': '∿', '/settings': '⚙', '/health': '✚',
+  '/backtest': '↺', '/lab': '⚗',
 };
 
 export default function Nav() {

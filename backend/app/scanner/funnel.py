@@ -108,7 +108,7 @@ async def analyze_catalyst(ctx: ScanContext, db: AsyncSession, symbol: str,
     basis = _content_hash(symbol,
                           "|".join(sorted(i["content_hash"] for i in news_items)),
                           "|".join(sorted(f.get("accession", "") for f in filings)),
-                          "analyzer-v2")  # bumped when the analysis contract changes
+                          "analyzer-v3-enums")  # bumped when the analysis contract changes
     cached = (await db.execute(select(Catalyst).where(Catalyst.content_hash == basis))
               ).scalar_one_or_none()
     if cached and cached.status == "ok":
@@ -128,7 +128,10 @@ async def analyze_catalyst(ctx: ScanContext, db: AsyncSession, symbol: str,
          "title": f.get("title"), "url": f.get("primary_doc_url"), "ref": f.get("accession")}
         for f in filings[:8]],
     }
-    analysis = await ctx.oai.analyze(json.dumps(evidence))
+    extraction = await ctx.oai.analyze_v2(json.dumps(evidence))
+    analysis = _extraction_to_legacy(extraction) if extraction else None
+    if analysis is not None:
+        analysis["extraction"] = extraction
     if analysis is None:
         row = Catalyst(symbol=symbol, content_hash=basis, status="failed")
         db.add(row)
@@ -168,6 +171,40 @@ async def analyze_catalyst(ctx: ScanContext, db: AsyncSession, symbol: str,
     return _catalyst_dict(row)
 
 
+MAT_ENUM_TO_100 = {"transformative": 90, "major": 70, "moderate": 45,
+                   "minor": 20, "immaterial": 5}
+NEG_CATS = {"rumor_promo", "reverse_split", "dilution_negative", "other_negative"}
+
+
+def _extraction_to_legacy(e: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic enum->legacy mapping (display/scoring-v1 compatibility).
+    The 1-3-scale bug is structurally impossible: enums only."""
+    from ..strategy.catalyst import grade_of
+    g = grade_of(e)
+    direction = ("positive" if g in ("A", "B")
+                 else "negative" if e["category"] in NEG_CATS
+                 else "neutral")
+    novelty = ("recycled" if e["freshness"] == "recycled" or not e.get("novel", True)
+               else "new" if e["freshness"] in ("breaking", "today", "overnight")
+               else "update")
+    return {
+        "direction": direction,
+        "materiality": MAT_ENUM_TO_100[e["materiality"]],
+        "novelty": novelty,
+        "confidence": e["confidence"],
+        "catalyst_type": e["category"],
+        "facts": [{"label": "counterparty", "value": c, "source_ref": ""}
+                  for c in e.get("counterparties", [])][:8] +
+                 ([{"label": "value", "value": e["quantified_value"],
+                    "source_ref": ""}] if e.get("quantified_value") else []),
+        "risks": [{"type": t, "severity": 50, "source_ref": ""}
+                  for t in e.get("negative_terms", [])][:8],
+        "dilution_detected": bool(e.get("dilution_detected")),
+        "going_concern_detected": bool(e.get("going_concern_detected")),
+        "plain_english_summary": e.get("evidence_summary", ""),
+    }
+
+
 def _catalyst_dict(row: Catalyst) -> Dict[str, Any]:
     a = row.analysis or {}
     return {"direction": row.direction, "materiality": row.materiality,
@@ -180,6 +217,7 @@ def _catalyst_dict(row: Catalyst) -> Dict[str, Any]:
             "has_original_source": bool(a.get("source_url")),
             "content_hash": row.content_hash,
             "facts": a.get("facts", []), "risks": a.get("risks", []),
+            "extraction": a.get("extraction"),
             "ai": row.status == "ok" and bool(a.get("plain_english_summary"))}
 
 

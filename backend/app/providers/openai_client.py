@@ -59,6 +59,10 @@ SYSTEM_PROMPT = (
 )
 
 
+from ..strategy.catalyst import (ANALYSIS_SCHEMA_V2, SYSTEM_PROMPT_V2,
+                                 validate_extraction)
+
+
 class OpenAiProvider:
     def __init__(self):
         cfg = get_config()
@@ -73,6 +77,41 @@ class OpenAiProvider:
     @property
     def configured(self) -> bool:
         return bool(self.key)
+
+    async def analyze_v2(self, evidence_text: str) -> Optional[Dict[str, Any]]:
+        """Enum-only structured extraction (v2 contract). Malformed => None."""
+        if not self.configured:
+            return None
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT_V2},
+                {"role": "user", "content": evidence_text[:24000]},
+            ],
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "catalyst_extract_v2", "strict": True,
+                "schema": ANALYSIS_SCHEMA_V2}},
+            "temperature": 0,
+        }
+        for attempt in range(2):
+            try:
+                resp = await self.client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {self.key}"},
+                    json=body)
+                if resp.status_code >= 400:
+                    if resp.status_code in (429, 500, 502, 503) and attempt == 0:
+                        continue
+                    return None
+                payload = resp.json()
+                self.last_usage = payload.get("usage") or {}
+                data = json.loads(payload["choices"][0]["message"]["content"])
+                return validate_extraction(data)
+            except (httpx.HTTPError, KeyError, json.JSONDecodeError, ValueError):
+                if attempt == 0:
+                    continue
+                return None
+        return None
 
     async def analyze(self, evidence_text: str) -> Optional[Dict[str, Any]]:
         """Returns validated analysis dict, or None on failure (caller marks pending/failed)."""
