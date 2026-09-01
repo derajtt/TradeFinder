@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan tracked files for secret patterns
+        run: |
+          set -e
+          PATTERNS='sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY-----|apikey=[A-Za-z0-9]{16,}'
+          if git grep -nIE "$PATTERNS" -- . ':!*.lock' ':!.github/workflows/ci.yml'; then
+            echo '::error::Potential secret found in tracked files'
+            exit 1
+          fi
+          echo "No secret patterns found."
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install -r backend/requirements-dev.txt
+      - name: Unit tests (mocked providers; no live keys in CI)
+        working-directory: backend
+        env:
+          ENV_FILE: /dev/null
+          FMP_API_KEY: ci-mock
+          APP_SECRET: ci-mock
+          DATABASE_URL: sqlite+aiosqlite://
+        run: python -m pytest -q
+      - name: Alembic migration check (sqlite)
+        working-directory: backend
+        env:
+          ENV_FILE: /dev/null
+          FMP_API_KEY: ci-mock
+          APP_SECRET: ci-mock
+          ALEMBIC_DATABASE_URL: sqlite+aiosqlite:///./ci.db
+        run: python -m alembic upgrade head
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        working-directory: frontend
+        run: npx vitest run
+      - name: Production build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE: http://localhost:8000
+        run: npm run build
