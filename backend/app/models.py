@@ -189,6 +189,7 @@ class BuySignal(Base):
     status: Mapped[str] = mapped_column(String(16), default="active")  # active|closed|invalidated
     signal_type: Mapped[str] = mapped_column(String(8), default="buy")  # buy|watch
     lifecycle: Mapped[str] = mapped_column(String(16), default="", index=True)  # v2 canonical status
+    profile: Mapped[str] = mapped_column(String(24), default="primary", index=True)
     price_tier: Mapped[str] = mapped_column(String(12), default="")
     cohort: Mapped[str] = mapped_column(String(12), default="live_paper")
     executable: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -300,6 +301,7 @@ class RejectedCandidate(Base):
     session_date: Mapped[str] = mapped_column(String(10), index=True)
     rejected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     lifecycle: Mapped[str] = mapped_column(String(16), default="REJECTED")
+    profile: Mapped[str] = mapped_column(String(24), default="primary", index=True)
     rejection_reason: Mapped[str] = mapped_column(Text, default="")
     failed_gates: Mapped[list] = mapped_column(JSON, default=list)
     price_at_reject: Mapped[float] = mapped_column(Float, nullable=True)
@@ -319,6 +321,7 @@ class PaperPosition(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     signal_id: Mapped[int] = mapped_column(ForeignKey("buy_signals.id"), index=True, unique=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
+    profile: Mapped[str] = mapped_column(String(24), default="primary", index=True)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     strategy_version: Mapped[str] = mapped_column(String(16), default="")
     entry_fill: Mapped[float] = mapped_column(Float)

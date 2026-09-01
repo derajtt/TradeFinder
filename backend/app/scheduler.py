@@ -25,6 +25,7 @@ from .scanner import bars as barmod
 from .scanner import funnel
 from .scoring.engine import STRATEGY_VERSION, score_candidate, universe_gates
 from .strategy import paper as paper_engine
+from .strategy.profiles import get_profiles, profile_settings
 from .strategy.dilution import assess as assess_dilution
 from .strategy.gates import evaluate as evaluate_v2
 from .strategy.tiers import tier_for
@@ -493,12 +494,23 @@ class Scheduler:
         extraction = (catalyst or {}).get("extraction")
         dilution = assess_dilution(filings, extraction,
                                    feats.get("recent_reverse_split", False))
-        verdict = evaluate_v2(feats, extraction, dilution, settings, t_et)
         fs_key = f"{sym}:{session_date}"
         if fs_key not in self._first_seen:
             self._first_seen[fs_key] = now_utc().isoformat()
-        await self._record_lifecycle(sym, session_date, feats, verdict, catalyst,
-                                     dilution, settings)
+        # every enabled strategy model evaluates the same data with its own settings
+        profiles = get_profiles(settings)
+        verdict = None
+        for pid, pcfg in profiles.items():
+            if not pcfg.get("enabled"):
+                continue
+            p_settings = profile_settings(settings, pid, profiles)
+            v = evaluate_v2(feats, extraction, dilution, p_settings, t_et)
+            await self._record_lifecycle(sym, session_date, feats, v, catalyst,
+                                         dilution, p_settings, profile=pid)
+            if pid == "primary":
+                verdict = v
+        if verdict is None:
+            verdict = evaluate_v2(feats, extraction, dilution, settings, t_et)
 
         async with SessionLocal() as db:
             cand = Candidate(run_id=run_id, symbol=sym, session_date=session_date,
@@ -679,7 +691,7 @@ class Scheduler:
                     "signal_uid": sig.signal_uid})
 
     async def _record_lifecycle(self, sym, session_date, feats, verdict, catalyst,
-                                dilution, settings):
+                                dilution, settings, profile="primary"):
         """Persist the v2 decision: ACTIONABLE_BUY / EARLY_WATCH / QUALIFIED_WATCH
         signals (immutable at signal time) and REJECTED shadow rows. Idempotent
         per (symbol, day, lifecycle-kind)."""
@@ -692,7 +704,7 @@ class Scheduler:
                  (settings.get("watch_score_min") or 50)):
             sig_type = "buy" if lc == "ACTIONABLE_BUY" else "watch"
             lc_store = lc if lc != "REJECTED" else "QUALIFIED_WATCH"
-            fp = f"v2:{lc_store}"
+            fp = f"v2:{profile}:{lc_store}"
             async with SessionLocal() as db:
                 if not await sigsvc.recent_signal_exists(db, sym, session_date,
                                                          STRATEGY_VERSION, fp):
@@ -723,6 +735,7 @@ class Scheduler:
                     if sig:
                         sig.catalyst_fingerprint = fp
                         sig.lifecycle = lc_store
+                        sig.profile = profile
                         sig.price_tier = verdict.get("tier") or ""
                         sig.versions = VERSIONS
                         sig.executable = bool(fill.get("filled")) and lc == "ACTIONABLE_BUY"
@@ -743,7 +756,10 @@ class Scheduler:
                         if lc == "ACTIONABLE_BUY":
                             sig.first_actionable_quote_at = now_utc()
                             sig.first_actionable_ask = feats.get("ask")
-                            await paper_engine.open_position(db, sig, verdict["setup"])
+                            pos = await paper_engine.open_position(db, sig,
+                                                                   verdict["setup"])
+                            if pos:
+                                pos.profile = profile
                         await db.commit()
                         await self._health("info", "signals",
                                            f"{lc_store} {sym} @ {price_basis} "
@@ -758,10 +774,12 @@ class Scheduler:
             async with SessionLocal() as db:
                 exists = (await db.execute(_sel(RejectedCandidate.id).where(
                     RejectedCandidate.symbol == sym,
-                    RejectedCandidate.session_date == session_date))).first()
+                    RejectedCandidate.session_date == session_date,
+                    RejectedCandidate.profile == profile))).first()
                 if not exists:
                     db.add(RejectedCandidate(
                         symbol=sym, session_date=session_date, lifecycle=lc,
+                        profile=profile,
                         rejection_reason=(verdict.get("rejection_reason") or "")[:2000],
                         failed_gates=[g["gate"] for g in verdict["gates"]
                                       if not g["pass"]],

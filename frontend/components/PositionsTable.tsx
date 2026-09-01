@@ -9,8 +9,8 @@ interface Pos {
   closed_at: string | null; strategy_version: string;
 }
 
-export default function PositionsTable({ onSelect }: { onSelect: (s: string) => void }) {
-  const [resp] = usePolling<{ rows: Pos[] }>('/api/positions', 20000);
+export default function PositionsTable({ onSelect, profile = '' }: { onSelect: (s: string) => void; profile?: string }) {
+  const [resp] = usePolling<{ rows: Pos[] }>(`/api/positions?profile=${profile}`, 20000);
   const rows = resp?.rows ?? [];
   return (
     <>

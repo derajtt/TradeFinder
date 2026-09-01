@@ -19,8 +19,8 @@ const COLOR: Record<string, string> = {
   INVALIDATED: 'var(--text-faint)', EXPIRED: 'var(--text-faint)',
 };
 
-export default function FunnelStrip() {
-  const [c] = usePolling<Canon>('/api/report/canonical', 30000);
+export default function FunnelStrip({ profile = '' }: { profile?: string }) {
+  const [c] = usePolling<Canon>(`/api/report/canonical?profile=${profile}`, 30000);
   if (!c) return null;
   const perf = c.actionable_buy_performance;
   return (

@@ -222,6 +222,21 @@ class BtData:
                         "site": row.get("site") or "", "url": row.get("url") or ""})
         return out
 
+    async def universe_symbols(self) -> List[str]:
+        """Current active NASDAQ/NYSE/AMEX common stocks $0.10-$8 (survivorship-
+        limited to current constituents — labeled in the coverage report)."""
+        data = await self._cached(SCREENER_CACHE_KEY, lambda: self._fmp(
+            "company-screener", {"exchange": "NASDAQ,NYSE,AMEX",
+                                 "priceLowerThan": 8, "priceMoreThan": 0.1,
+                                 "isActivelyTrading": "true", "isEtf": "false",
+                                 "isFund": "false", "limit": 5000}))
+        out = []
+        for row in data if isinstance(data, list) else []:
+            s = str(row.get("symbol") or "").upper()
+            if s and s.isalnum() and len(s) <= 5:
+                out.append(s)
+        return out
+
     async def sec_form_index(self, d: str) -> List[dict]:
         """Free EDGAR daily form index: every filing with form type + CIK."""
         dt = date.fromisoformat(d)
@@ -253,6 +268,41 @@ class BtData:
                     except IndexError:
                         continue
         return out
+
+
+SCREENER_CACHE_KEY = "univ:v1"
+
+
+class UniverseEod:
+    """One-time preload of EOD series for the (current-constituent, documented
+    survivorship-limited) universe; prev-day movers computed locally after that."""
+
+    def __init__(self, data: "BtData"):
+        self.data = data
+        self._series: Dict[str, List[dict]] = {}
+
+    async def load(self, symbols: List[str]):
+        for s in symbols:
+            self._series[s] = await self.data.eod(s)
+
+    def prev_movers(self, d: str, min_gain: float = 15.0,
+                    band=(0.08, 8.0), top: int = 30) -> List[str]:
+        out = []
+        for sym, series in self._series.items():
+            rows = sorted((r for r in series if r["date"] and r["date"] < d),
+                          key=lambda r: r["date"])
+            if len(rows) < 2:
+                continue
+            p0, p1 = rows[-2], rows[-1]
+            if not p0["close"] or not p1["close"]:
+                continue
+            if not (band[0] <= p1["close"] <= band[1]):
+                continue
+            chg = (p1["close"] - p0["close"]) / p0["close"] * 100.0
+            if chg >= min_gain:
+                out.append((chg, sym))
+        out.sort(reverse=True)
+        return [s for _, s in out[:top]]
 
 
 def trading_sessions(start: str, end: str) -> List[str]:

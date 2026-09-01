@@ -20,6 +20,7 @@ from ..models import (AiUsage, BtJob, BuySignal, Candidate,
                       ScannerRun, SecFiling, ShadowExit, SignalEvent,
                       SignalPriceCheckpoint, Symbol, SymbolReferenceVersion)
 from ..analytics import canonical_report, effective_lifecycle
+from ..strategy.profiles import DEFAULT_PROFILES, get_profiles
 from ..scoring.engine import DEFAULT_SETTINGS, STRATEGY_VERSION
 from ..settings_service import get_settings, update_settings
 from ..signals.service import metrics_with_outcome, signal_metrics
@@ -198,8 +199,13 @@ async def candidate_detail(symbol: str, request: Request,
 
 @router.get("/signals")
 async def signals(active_only: bool = False, include_demo: bool = False,
-                  limit: int = 200, db: AsyncSession = Depends(get_session)):
+                  limit: int = 200, profile: str = "",
+                  db: AsyncSession = Depends(get_session)):
     q = select(BuySignal).order_by(desc(BuySignal.initiated_at)).limit(min(limit, 1000))
+    if profile:
+        q = q.where((BuySignal.profile == profile) |
+                    (BuySignal.profile == "") | (BuySignal.profile.is_(None))
+                    if profile == "primary" else BuySignal.profile == profile)
     if active_only:
         q = q.where(BuySignal.status == "active")
     if not include_demo:
@@ -221,6 +227,8 @@ async def signals(active_only: bool = False, include_demo: bool = False,
             "since_high": s.since_signal_high, "since_low": s.since_signal_low,
             "status": s.status, "is_demo": s.is_demo,
             "signal_type": getattr(s, "signal_type", "buy"),
+            "profile": getattr(s, "profile", "primary") or "primary",
+            "lifecycle": getattr(s, "lifecycle", "") or "",
             "score": (s.score_snapshot or {}).get("score"),
             "catalyst_type": ((s.evidence_snapshot or {}).get("catalyst") or {}).get("catalyst_type", ""),
             "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
@@ -435,18 +443,50 @@ async def stream(request: Request):
 
 
 @router.get("/report/canonical")
-async def report_canonical(db: AsyncSession = Depends(get_session)):
+async def report_canonical(profile: str = "", db: AsyncSession = Depends(get_session)):
     """THE single source for every displayed total."""
-    return await canonical_report(db, await _get_settings(db))
+    return await canonical_report(db, await _get_settings(db), profile=profile or None)
+
+
+@router.get("/profiles")
+async def profiles_get(db: AsyncSession = Depends(get_session)):
+    s = await _get_settings(db)
+    return {"profiles": get_profiles(s)}
+
+
+@router.put("/profiles")
+async def profiles_put(payload: Dict[str, Any],
+                       db: AsyncSession = Depends(get_session)):
+    """payload = {profiles: {id: {name, enabled, color, description, overrides}}}"""
+    from ..settings_service import update_settings as _upd
+    incoming = payload.get("profiles")
+    if not isinstance(incoming, dict):
+        raise HTTPException(400, "profiles dict required")
+    clean = {}
+    for pid, cfg in list(incoming.items())[:12]:
+        if not isinstance(cfg, dict):
+            continue
+        clean[str(pid)[:24]] = {
+            "name": str(cfg.get("name", pid))[:32],
+            "enabled": bool(cfg.get("enabled")),
+            "color": str(cfg.get("color", "#93a1bd"))[:16],
+            "description": str(cfg.get("description", ""))[:300],
+            "overrides": {k: v for k, v in (cfg.get("overrides") or {}).items()
+                          if isinstance(k, str)}}
+    s = await _upd(db, {"profiles": clean})
+    return {"profiles": get_profiles(s)}
 
 
 @router.get("/rejected")
-async def rejected(limit: int = 100, db: AsyncSession = Depends(get_session)):
-    rows = (await db.execute(select(RejectedCandidate)
-                             .order_by(desc(RejectedCandidate.id))
-                             .limit(min(limit, 400)))).scalars().all()
+async def rejected(limit: int = 100, profile: str = "",
+                   db: AsyncSession = Depends(get_session)):
+    q = select(RejectedCandidate).order_by(desc(RejectedCandidate.id)).limit(min(limit, 400))
+    if profile:
+        q = q.where(RejectedCandidate.profile == profile)
+    rows = (await db.execute(q)).scalars().all()
     return {"rows": [{
         "symbol": r.symbol, "session_date": r.session_date,
+        "profile": r.profile,
         "rejected_at": r.rejected_at.isoformat(), "lifecycle": r.lifecycle,
         "reason": r.rejection_reason, "failed_gates": r.failed_gates,
         "price": r.price_at_reject, "score": r.score,
@@ -459,12 +499,14 @@ async def rejected(limit: int = 100, db: AsyncSession = Depends(get_session)):
 
 
 @router.get("/positions")
-async def positions(db: AsyncSession = Depends(get_session)):
-    rows = (await db.execute(select(PaperPosition)
-                             .order_by(desc(PaperPosition.id)).limit(200)
-                             )).scalars().all()
+async def positions(profile: str = "", db: AsyncSession = Depends(get_session)):
+    q = select(PaperPosition).order_by(desc(PaperPosition.id)).limit(200)
+    if profile:
+        q = q.where(PaperPosition.profile == profile)
+    rows = (await db.execute(q)).scalars().all()
     return {"rows": [{
-        "symbol": p.symbol, "status": p.status, "opened_at": p.opened_at.isoformat(),
+        "symbol": p.symbol, "status": p.status, "profile": p.profile,
+        "opened_at": p.opened_at.isoformat(),
         "entry_fill": p.entry_fill, "stop": p.stop, "target1": p.target1,
         "target2": p.target2, "size_usd": p.size_usd,
         "remaining_frac": p.remaining_frac, "realized_r": p.realized_r,

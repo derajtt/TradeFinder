@@ -4,10 +4,11 @@ land in backend/data/bt/. Run:  ../.venv/bin/python scripts/backtest_run.py [--q
 import asyncio, json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import httpx
-from app.bt.data import BtData, trading_sessions
+from app.bt.data import BtData, UniverseEod, trading_sessions
 from app.bt.replay import SessionReplay
-from app.bt.optimize import (ACCURACY_FLOOR, CONVERGENCE, Registry, config_hash,
-                             entry_filter, eval_config, passes_floor, pbo_estimate,
+from app.bt.optimize import (ACCURACY_FLOOR, CONVERGENCE, Registry, capacity_table,
+                             config_hash, entry_filter, eval_config,
+                             feature_importance, passes_floor, pbo_estimate,
                              staged_search, walk_forward)
 from app.bt.tournament import (bootstrap_ci, metrics, mfe_decay, run_policy,
                                segment, tournament)
@@ -100,8 +101,16 @@ async def main():
     global rp_ai
     data = BtData(SessionLocal, rps=3.0)
     rp_ai = AI()
-    rp = SessionReplay(data, ai_client=rp_ai)
     print(f"splits: DEV={len(DEV)} VAL={len(VAL)} HOLDOUT={len(HOLDOUT)} sessions")
+    uni = UniverseEod(data)
+    syms = await data.universe_symbols()
+    if QUICK:
+        syms = syms[:400]
+    print(f"universe: {len(syms)} symbols — preloading EOD (cached after first run)")
+    t0u = time.time()
+    await uni.load(syms)
+    print(f"eod preload done in {time.time()-t0u:.0f}s (api={data.api_calls})")
+    rp = SessionReplay(data, ai_client=rp_ai, universe=uni)
 
     dev_trades, dev_sum, dev_inc = await build_dataset(DEV, "dev", data, rp)
     val_trades, val_sum, val_inc = await build_dataset(VAL, "val", data, rp)
@@ -161,6 +170,9 @@ async def main():
         pool_locked = entry_filter(dev_trades + val_trades, lock["entry"])
         result["tournament"] = tournament(pool_locked)
         result["mfe_decay"] = mfe_decay(pool_locked)
+        result["feature_importance"] = feature_importance(
+            entry_filter(trades_val, lock["entry"]) or trades_val, lock["exit"])
+        result["capacity"] = capacity_table(pool_locked, lock["exit"])
         result["by_time"] = segment(run_policy(pool_locked, lock["exit"], "baseline"),
                                     lambda r: r["signal_time"][11:13])
         # ---- HOLDOUT: fetched and evaluated ONCE, after locking ----

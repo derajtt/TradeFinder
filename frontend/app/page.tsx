@@ -4,17 +4,20 @@ import CandidateTable from '../components/CandidateTable';
 import RadarTable, { type RadarRow } from '../components/RadarTable';
 import SessionStrip from '../components/SessionStrip';
 import FunnelStrip from '../components/FunnelStrip';
+import ProfileTabs from '../components/ProfileTabs';
 import PositionsTable from '../components/PositionsTable';
 import RejectedTable from '../components/RejectedTable';
 import DetailDrawer from '../components/DetailDrawer';
 import SignalTable from '../components/SignalTable';
 import { useEventStream, usePolling } from '../lib/api';
+import { useProfile } from '../lib/profile';
 import { fmtPct, fmtPrice } from '../lib/format';
 import type { CandidateRow, SignalRow, StatusPayload } from '../lib/types';
 
 export default function Dashboard() {
+  const [profile] = useProfile();
   const [candResp] = usePolling<{ rows: CandidateRow[]; radar?: RadarRow[] }>('/api/candidates', 30000);
-  const [sigResp, , reloadSigs] = usePolling<{ rows: SignalRow[] }>('/api/signals?active_only=true', 30000);
+  const [sigResp, , reloadSigs] = usePolling<{ rows: SignalRow[] }>(`/api/signals?active_only=true&profile=${profile}`, 30000);
   const [status] = usePolling<StatusPayload>('/api/status', 20000);
   const [liveRows, setLiveRows] = useState<CandidateRow[] | null>(null);
   const [liveRadar, setLiveRadar] = useState<RadarRow[] | null>(null);
@@ -62,7 +65,8 @@ export default function Dashboard() {
   return (
     <>
       <SessionStrip confirmAt="07:00" />
-      <FunnelStrip />
+      <ProfileTabs />
+      <FunnelStrip profile={profile} />
       <div className="cards">
         <div className={`card ${sigRows.length ? 'glow-buy' : ''}`}>
           <h3>Active BUY Signals</h3>
@@ -112,8 +116,8 @@ export default function Dashboard() {
       </div>
       <CandidateTable rows={rows} updatedSyms={updated} onSelect={onSelect} />
 
-      <PositionsTable onSelect={onSelect} />
-      <RejectedTable onSelect={onSelect} />
+      <PositionsTable onSelect={onSelect} profile={profile} />
+      <RejectedTable onSelect={onSelect} profile={profile} />
       <RadarTable rows={radar} onSelect={onSelect} />
 
       <p className="disclaimer">

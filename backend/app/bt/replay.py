@@ -36,11 +36,13 @@ def _f(v, d=None):
 
 
 class SessionReplay:
-    def __init__(self, data: BtData, ai_client=None, cfg: Optional[dict] = None):
+    def __init__(self, data: BtData, ai_client=None, cfg: Optional[dict] = None,
+                 universe=None):
         self.data = data
         self.ai = ai_client            # async callable(evidence_text)->raw dict | None
         self.cfg = cfg or {}
         self.ai_cache: Dict[str, Optional[dict]] = {}
+        self.universe = universe       # UniverseEod (optional; enables movers door)
 
     async def discover(self, d: str, cap: int = 25) -> List[dict]:
         """Candidates from catalyst timestamps only:
@@ -101,16 +103,28 @@ class SessionReplay:
                     await consider(sym, at, f"sec:{row['form']}")
                     break
 
-        # prev-day mover door (known before the session)
-        movers = await self._prev_movers(d, prev_d)
-        for sym in movers:
-            if sym not in cands and looks_common_stock(sym, ""):
-                await consider(sym, _dt.fromisoformat(d + "T04:00:00").replace(tzinfo=ET),
-                               "prev_day_mover")
+        # prev-day mover door (close-to-close move known before the session)
+        if self.universe is not None:
+            for sym in self.universe.prev_movers(d):
+                if sym not in cands and looks_common_stock(sym, ""):
+                    await consider(sym, _dt.fromisoformat(d + "T04:00:00")
+                                   .replace(tzinfo=ET), "prev_day_mover")
 
-        out = list(cands.values())
-        out.sort(key=lambda c: c["first_pub"])
-        out = out[:cap]
+        pool = list(cands.values())
+        # movers first (highest premarket-tradeability prior), then SEC by time
+        pool.sort(key=lambda c: (c["why"] != "prev_day_mover", c["first_pub"]))
+        # fill the cap with TRADEABLE candidates only (has premarket bars);
+        # untradeable filers must not crowd out real candidates
+        out = []
+        probes = 0
+        for c in pool:
+            if len(out) >= cap or probes >= cap * 3:
+                break
+            probes += 1
+            bars = await self.data.five_min_bars(c["symbol"], d)
+            pm = [b for b in bars if 240 <= b["minute_of_day"] < 570 and b["v"] > 0]
+            if len(pm) >= 3:
+                out.append(c)
         # evidence enrichment: per-symbol news window prev day -> session day
         for c in out:
             try:
@@ -121,15 +135,6 @@ class SessionReplay:
             except Exception:
                 c["news"] = []
         return out
-
-    async def _prev_movers(self, d: str, prev_d: str) -> List[str]:
-        """Prev-session close-to-close gainers >= 15% within the price band, using
-        cached EOD series of symbols already seen in bt_cache (bounded, honest)."""
-        key = f"pmv:{prev_d}"
-        cached = await self._db_ai_cache(key)
-        if cached:
-            return cached.get("syms", [])
-        return []
 
     async def extract_catalyst(self, sym: str, news: List[dict]) -> Optional[dict]:
         basis = doc_hash(sym, *[n["url"] or n["title"] for n in news[:4]])

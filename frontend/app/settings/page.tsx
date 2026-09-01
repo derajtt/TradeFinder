@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPost, apiPut } from '../../lib/api';
+import ProfileEditor from '../../components/ProfileEditor';
 import type { AppSettings } from '../../lib/types';
 
 interface SettingsResp { settings: AppSettings; defaults: AppSettings;
@@ -169,6 +170,8 @@ export default function SettingsPage() {
         </button>
         {saved && <span className="save-note">{saved}</span>}
       </div>
+
+      <ProfileEditor />
 
       <div className="sect"><h2 style={{ fontSize: 13 }}>Environment (read-only)</h2>
         <span className="meta">configured / not configured only — values are never shown</span></div>

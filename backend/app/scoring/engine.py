@@ -37,6 +37,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "watch_enabled": True,         # record notable candidates as WATCH picks (tracked like signals)
     "watch_score_min": 50,
     "watch_max_gap_pct": 100.0,    # never chase spikes already up more than this
+    "rotation_hard_cap": 1.0,
+    "max_ext_above_vwap_pct": 20.0,
+    "slippage_pct": 0.4,
     "early_window_min": 30,        # outcome judged on the first N minutes of tradability
     "early_win_gain_pct": 2.0,     # up this much inside the window = WIN (0 = any uptick)
 

@@ -11,9 +11,12 @@ from .scoring.engine import DEFAULT_SETTINGS, NULLABLE_KEYS, STRATEGY_VERSION
 
 
 STRING_KEYS = {"buy_confirm_after_et"}
+DICT_KEYS = {"profiles"}
 
 
 def _coerce(key: str, value):
+    if key in DICT_KEYS:
+        return value if isinstance(value, dict) else {}
     if key in STRING_KEYS:
         v = str(value or "").strip()
         if v and not __import__("re").match(r"^([01]?\d|2[0-3]):[0-5]\d$", v):
@@ -39,7 +42,7 @@ async def get_settings(session: AsyncSession) -> Dict[str, Any]:
     merged = dict(DEFAULT_SETTINGS)
     if row and isinstance(row.data, dict):
         for k, v in row.data.items():
-            if k in DEFAULT_SETTINGS:
+            if k in DEFAULT_SETTINGS or k in DICT_KEYS:
                 merged[k] = v
     return merged
 
@@ -52,7 +55,7 @@ async def update_settings(session: AsyncSession, patch: Dict[str, Any]) -> Dict[
         await session.flush()
     data = dict(row.data or {})
     for k, v in patch.items():
-        if k in DEFAULT_SETTINGS:
+        if k in DEFAULT_SETTINGS or k in DICT_KEYS:
             data[k] = _coerce(k, v)
     row.data = data
     await session.commit()

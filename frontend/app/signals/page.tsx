@@ -3,10 +3,13 @@ import { useMemo, useState } from 'react';
 import SignalTable from '../../components/SignalTable';
 import DetailDrawer from '../../components/DetailDrawer';
 import { API_BASE, usePolling, withKey } from '../../lib/api';
+import ProfileTabs from '../../components/ProfileTabs';
+import { useProfile } from '../../lib/profile';
 import type { SignalRow } from '../../lib/types';
 
 export default function SignalsPage() {
-  const [resp] = usePolling<{ rows: SignalRow[] }>('/api/signals?include_demo=true&limit=500', 30000);
+  const [profile] = useProfile();
+  const [resp] = usePolling<{ rows: SignalRow[] }>(`/api/signals?include_demo=true&limit=500&profile=${profile}`, 30000);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('active');
   const [selected, setSelected] = useState<string | null>(null);
@@ -20,6 +23,7 @@ export default function SignalsPage() {
 
   return (
     <>
+      <ProfileTabs />
       <div className="sect">
         <h2>Signal History</h2>
         <span className="meta">immutable chronological record — corrections are new events, never edits</span>

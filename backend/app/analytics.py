@@ -50,11 +50,21 @@ def effective_lifecycle(s: BuySignal) -> str:
     return "QUALIFIED_WATCH"
 
 
-async def canonical_report(db: AsyncSession, settings: Dict[str, Any]) -> Dict[str, Any]:
-    sigs = (await db.execute(select(BuySignal).where(
-        BuySignal.is_demo == False))).scalars().all()  # noqa: E712
-    rejects_n = (await db.execute(select(RejectedCandidate))).scalars().all()
-    positions = (await db.execute(select(PaperPosition))).scalars().all()
+async def canonical_report(db: AsyncSession, settings: Dict[str, Any],
+                           profile: Optional[str] = None) -> Dict[str, Any]:
+    sq = select(BuySignal).where(BuySignal.is_demo == False)  # noqa: E712
+    rq = select(RejectedCandidate)
+    pq = select(PaperPosition)
+    if profile:
+        legacy_ok = (profile == "primary")
+        sq = sq.where((BuySignal.profile == profile) |
+                      ((BuySignal.profile == "") if legacy_ok else False) |
+                      (BuySignal.profile.is_(None) if legacy_ok else False))
+        rq = rq.where(RejectedCandidate.profile == profile)
+        pq = pq.where(PaperPosition.profile == profile)
+    sigs = (await db.execute(sq)).scalars().all()
+    rejects_n = (await db.execute(rq)).scalars().all()
+    positions = (await db.execute(pq)).scalars().all()
     shadows = (await db.execute(select(ShadowExit).where(
         ShadowExit.status.like("done%")))).scalars().all()
 
@@ -89,6 +99,7 @@ async def canonical_report(db: AsyncSession, settings: Dict[str, Any]) -> Dict[s
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "profile": profile or "all",
         "versions": VERSIONS,
         "lifecycle_counts": {k: len(v) for k, v in by_lc.items() if v},
         "totals": {

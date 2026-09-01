@@ -10,8 +10,8 @@ interface Rej {
   missed_move_pct: number | null;
 }
 
-export default function RejectedTable({ onSelect }: { onSelect: (s: string) => void }) {
-  const [resp] = usePolling<{ rows: Rej[] }>('/api/rejected', 60000);
+export default function RejectedTable({ onSelect, profile = '' }: { onSelect: (s: string) => void; profile?: string }) {
+  const [resp] = usePolling<{ rows: Rej[] }>(`/api/rejected?profile=${profile}`, 60000);
   const [open, setOpen] = useState(false);
   const rows = resp?.rows ?? [];
   if (!rows.length) return null;

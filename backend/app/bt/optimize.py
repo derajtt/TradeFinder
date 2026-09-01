@@ -227,3 +227,80 @@ def pbo_estimate(registry: Registry) -> Optional[float]:
     median = val_exps[len(val_exps) // 2]
     below = sum(1 for r in top if (r["val"]["expectancy_pct"] or -99) < median)
     return round(below / len(top), 3)
+
+
+# ── feature research: does each feature separate outcomes on UNSEEN data? ──
+FEATURES_TO_TEST = [
+    ("gap_pct", lambda t: t.get("gap_pct")),
+    ("pm_dollar_volume", lambda t: t.get("pm_dollar_volume")),
+    ("rotation", lambda t: t.get("rotation")),
+    ("spread_est_pct", lambda t: t.get("spread_est_pct")),
+    ("score", lambda t: t.get("score")),
+    ("volume_acceleration", lambda t: (t.get("features") or {}).get("volume_acceleration")),
+    ("ext_above_vwap_pct", lambda t: (t.get("features") or {}).get("ext_above_vwap_pct")),
+    ("signal_hour", lambda t: int(t["signal_time"][11:13]) if t.get("signal_time") else None),
+]
+
+
+def feature_importance(trades: List[dict], exit_name: str = "target_1R",
+                       min_n: int = 20) -> List[Dict[str, Any]]:
+    """Median-split each feature; compare baseline-execution expectancy above vs
+    below. Honest: reports 'insufficient sample' below min_n per side."""
+    res = run_policy(trades, exit_name, "baseline")
+    rows = []
+    for name, fn in FEATURES_TO_TEST:
+        vals = [(fn(t), r) for t, r in zip(trades, res)
+                if fn(t) is not None and r["pct"] is not None
+                and r["outcome"] in ("win", "loss", "neutral")]
+        if len(vals) < min_n * 2:
+            rows.append({"feature": name, "verdict": "insufficient_sample",
+                         "n": len(vals)})
+            continue
+        vs = sorted(v for v, _ in vals)
+        med = vs[len(vs) // 2]
+        lo = [r["pct"] for v, r in vals if v <= med]
+        hi = [r["pct"] for v, r in vals if v > med]
+        if len(lo) < min_n or len(hi) < min_n:
+            rows.append({"feature": name, "verdict": "insufficient_sample",
+                         "n": len(vals)})
+            continue
+        e_lo = sum(lo) / len(lo)
+        e_hi = sum(hi) / len(hi)
+        rows.append({"feature": name, "n": len(vals), "median": round(med, 3),
+                     "exp_below": round(e_lo, 3), "exp_above": round(e_hi, 3),
+                     "delta": round(e_hi - e_lo, 3),
+                     "verdict": ("separates" if abs(e_hi - e_lo) > 0.5
+                                 else "no_demonstrated_value")})
+    return rows
+
+
+# ── position-size capacity: a setup may work at $500 but not $10k ──
+SIZES_USD = [500, 1000, 2500, 5000, 10000]
+PARTICIPATION_LIMIT = 0.05   # never assume more than 5% of premarket $-volume
+
+
+def capacity_table(trades: List[dict], exit_name: str,
+                   model: str = "baseline") -> List[Dict[str, Any]]:
+    res = run_policy(trades, exit_name, model)
+    out = []
+    for size in SIZES_USD:
+        pnl, filled, partial, nofill = [], 0, 0, 0
+        for t, r in zip(trades, res):
+            cap_usd = (t.get("pm_dollar_volume") or 0) * PARTICIPATION_LIMIT
+            if cap_usd < size * 0.25:
+                nofill += 1
+                continue
+            frac = min(1.0, cap_usd / size)
+            if frac < 1.0:
+                partial += 1
+            else:
+                filled += 1
+            if r["pct"] is not None and r["outcome"] in ("win", "loss", "neutral"):
+                pnl.append(size * frac * r["pct"] / 100.0)
+        n = filled + partial
+        out.append({"size_usd": size, "filled": filled, "partial": partial,
+                    "no_fill": nofill,
+                    "fill_rate": round(n / len(trades), 3) if trades else None,
+                    "expectancy_usd": round(sum(pnl) / len(pnl), 2) if pnl else None,
+                    "total_pnl_usd": round(sum(pnl), 2) if pnl else None})
+    return out

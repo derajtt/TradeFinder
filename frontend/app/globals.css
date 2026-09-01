@@ -260,3 +260,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 .session-marker { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--warn); }
 .session-marker::after { content: attr(data-label); position: absolute; top: 13px; left: -14px; font-size: 9px; color: var(--warn); white-space: nowrap; }
 .session-now { position: absolute; top: -4px; width: 10px; height: 14px; margin-left: -5px; border-radius: 3px; background: var(--text); box-shadow: 0 0 10px rgba(226, 233, 246, 0.7); }
+
+/* strategy-model tabs */
+.ptabs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 2px 0 14px; }
+.ptab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 15px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel);
+  color: var(--text-dim); font-weight: 650; font-size: 12.5px; transition: all .15s; }
+.ptab:hover { color: var(--text); border-color: var(--text-faint); }
+.ptab.active { background: var(--bg-hover); font-weight: 750; }
+.ptab.off { opacity: 0.55; }
