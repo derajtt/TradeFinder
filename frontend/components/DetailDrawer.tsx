@@ -211,6 +211,11 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
               <KV k="Max gain" v={fmtPct(sig.max_gain_pct)} cls="pos" />
               <KV k="Max drawdown" v={fmtPct(sig.max_drawdown_pct)} cls="neg" />
               <KV k="Initiated" v={fmtEtDate(sig.initiated_at)} mono={false} />
+              <KV k="Post-7:00 High / Low" v={`${fmtPrice(sig.post7_high)} / ${fmtPrice(sig.post7_low)}`}
+                 tip="Highest and lowest prices observed after the broker premarket window opened — the basis for WIN/LOSS." />
+              <KV k="Result" v={(sig.outcome || 'pending').toUpperCase()}
+                 cls={sig.outcome === 'win' ? 'pos' : sig.outcome === 'loss' ? 'neg' : ''}
+                 tip="WIN = +10% reached after the window · LOSS = finished below found price." />
             </div>
           </>)}
 

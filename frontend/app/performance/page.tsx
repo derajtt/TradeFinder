@@ -4,7 +4,9 @@ import { fmtNum, fmtPct } from '../../lib/format';
 
 interface Group { n: number; win_rate: number | null; avg_change_pct: number | null;
   avg_max_gain_pct: number | null; avg_max_drawdown_pct: number | null; }
-interface Perf { total_signals: number; groups: Record<string, Record<string, Group>>; }
+interface Perf { total_signals: number; groups: Record<string, Record<string, Group>>;
+  outcomes?: { win: number; neutral: number; loss: number; pending: number;
+               win_rate: number | null; by_type: Record<string, Record<string, number>> }; }
 
 const TITLES: Record<string, string> = {
   score_band: 'By score band', catalyst: 'By catalyst type',
@@ -20,6 +22,37 @@ export default function PerformancePage() {
         <h2>Performance</h2>
         <span className="meta">honest aggregates over {perf.total_signals} recorded signals (demo excluded)</span>
       </div>
+      {perf.outcomes && (
+        <>
+          <div className="sect"><h2 style={{ fontSize: 13 }}>Scanner scoreboard</h2>
+            <span className="meta">WIN = +10% reached after the 7:00 window · LOSS = finished red · includes WATCH picks</span></div>
+          <div className="cards" style={{ marginTop: 4 }}>
+            <div className="card"><h3>Win rate</h3>
+              <div className="big pos">{perf.outcomes.win_rate != null ? (perf.outcomes.win_rate * 100).toFixed(0) + '%' : '—'}</div>
+              <div className="sub">{perf.outcomes.win + perf.outcomes.loss} decided</div></div>
+            <div className="card"><h3>Wins ≥ +10%</h3><div className="big pos">{perf.outcomes.win}</div></div>
+            <div className="card"><h3>Neutral</h3><div className="big dim">{perf.outcomes.neutral}</div></div>
+            <div className="card"><h3>Losses</h3><div className="big neg">{perf.outcomes.loss}</div>
+              <div className="sub">{perf.outcomes.pending} still pending</div></div>
+          </div>
+          {Object.keys(perf.outcomes.by_type).length > 1 && (
+            <div className="tbl-wrap" style={{ marginBottom: 8 }}>
+              <table className="tbl" style={{ minWidth: 420 }}>
+                <thead><tr><th className="l">Type</th><th>Win</th><th>Neutral</th><th>Loss</th><th>Pending</th></tr></thead>
+                <tbody>
+                  {Object.entries(perf.outcomes.by_type).map(([t, o]) => (
+                    <tr key={t} style={{ cursor: 'default' }}>
+                      <td className="l"><span className={`badge ${t === 'buy' ? 'buy' : 'early'}`}>{t.toUpperCase()}</span></td>
+                      <td className="pos">{o.win}</td><td>{o.neutral}</td>
+                      <td className="neg">{o.loss}</td><td className="dim">{o.pending}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
       {perf.total_signals === 0 && (
         <div className="tbl-wrap"><div className="empty">
           <b>No signals recorded yet</b>

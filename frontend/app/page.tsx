@@ -76,6 +76,17 @@ export default function Dashboard() {
           <div className="sub">{topCand ? (topCand.catalyst_type || 'no catalyst identified') : 'scanner warming up'}</div>
         </div>
         <div className="card">
+          <h3>Scanner Hit Rate</h3>
+          <div className="big" title="WIN = reached +10% after the 7:00 broker window · LOSS = finished below found price · else neutral">
+            {status?.outcomes?.win_rate != null ? `${(status.outcomes.win_rate * 100).toFixed(0)}%` : '—'}
+          </div>
+          <div className="sub">
+            {status?.outcomes
+              ? <><span className="pos">{status.outcomes.win}W</span> · <span className="dim">{status.outcomes.neutral}N</span> · <span className="neg">{status.outcomes.loss}L</span> · {status.outcomes.pending} pending</>
+              : 'no tracked picks yet'}
+          </div>
+        </div>
+        <div className="card">
           <h3>Scanner Health</h3>
           <div className="big" style={{ color: status?.scanner?.last_cycle_ok ? 'var(--buy)' : 'var(--warn)' }}>
             {status?.scanner?.paused ? 'PAUSED' : status?.scanner?.last_cycle_ok ? 'LIVE' : status?.scanner?.last_cycle_ok === false ? 'ERROR' : '…'}

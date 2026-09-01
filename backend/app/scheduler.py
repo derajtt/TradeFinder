@@ -663,6 +663,13 @@ class Scheduler:
                 await self._health("warn", "tracking", f"quote fetch failed: {e}")
                 return  # tracking failure must not alter signals
             updates = []
+            t_now = now_et()
+            confirm = str(settings.get("buy_confirm_after_et") or "07:00")
+            try:
+                _h, _m = confirm.split(":")
+                window_open = (t_now.hour * 60 + t_now.minute) >= int(_h) * 60 + int(_m)
+            except ValueError:
+                window_open = True
             for sig in sigs:
                 q = quotes.get(sig.symbol)
                 if not q or not q.get("price"):
@@ -671,6 +678,8 @@ class Scheduler:
                                              provider_ts=q.get("provider_ts"),
                                              day_high=q.get("day_high"),
                                              day_low=q.get("day_low"))
+                if window_open:
+                    sigsvc.update_post_window(sig, q["price"])
                 await sigsvc.record_due_checkpoints(db, sig, q["price"])
                 if finalize:
                     await sigsvc.record_close_checkpoint(db, sig, q["price"])

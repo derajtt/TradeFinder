@@ -33,10 +33,17 @@ export interface SignalRow {
   checkpoints: Record<string, { price: number; pct: number }>;
   change_abs: number | null; change_pct: number | null;
   max_gain_pct: number | null; max_drawdown_pct: number | null;
+  outcome?: string; post7_high?: number | null; post7_low?: number | null;
+}
+
+export interface Outcomes {
+  win: number; neutral: number; loss: number; pending: number;
+  win_rate: number | null; tracked?: number;
 }
 
 export interface StatusPayload {
   et_time: string; phase: string;
+  outcomes?: Outcomes;
   scanner: { phase: string; last_cycle_at: string | null; last_cycle_ok: boolean | null;
              next_run_at: string | null; cycles: number; last_error: string;
              candidates: number; paused?: boolean };

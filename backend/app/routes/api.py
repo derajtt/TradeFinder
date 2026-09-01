@@ -20,7 +20,7 @@ from ..models import (AiUsage, BuySignal, Candidate, CandidateFeatureSnapshot,
                       SymbolReferenceVersion)
 from ..scoring.engine import DEFAULT_SETTINGS, STRATEGY_VERSION
 from ..settings_service import get_settings, update_settings
-from ..signals.service import signal_metrics
+from ..signals.service import classify_outcome, signal_metrics
 from ..sse import broadcaster
 from ..util.timeutil import next_scan_start, now_et, session_phase
 
@@ -52,8 +52,16 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
                                .where(BuySignal.status == "active",
                                       BuySignal.signal_type == "buy",
                                       BuySignal.is_demo == False))).scalar() or 0  # noqa: E712
+    real = (await db.execute(select(BuySignal).where(
+        BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+    oc = {"win": 0, "neutral": 0, "loss": 0, "pending": 0}
+    for s_ in real:
+        oc[classify_outcome(s_)] += 1
+    dec = oc["win"] + oc["loss"]
     return {
         "et_time": t.isoformat(), "phase": session_phase(),
+        "outcomes": {**oc, "win_rate": round(oc["win"] / dec, 3) if dec else None,
+                     "tracked": len(real)},
         "scanner": (sched.state if sched else {"phase": "not_started"}),
         "next_scan_start": next_scan_start().isoformat(),
         "active_signals": active,
@@ -308,7 +316,22 @@ async def performance(db: AsyncSession = Depends(get_session)):
                       "avg_max_gain_pct": round(sum(g["mg"]) / len(g["mg"]), 3) if g["mg"] else None,
                       "avg_max_drawdown_pct": round(sum(g["md"]) / len(g["md"]), 3) if g["md"] else None}
         return out
+    # win/loss scoreboard (user rule): +10% reached after the broker window = win,
+    # finished below found price = loss, else neutral; pending until data exists
+    all_real = (await db.execute(select(BuySignal).where(
+        BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+    outcomes = {"win": 0, "neutral": 0, "loss": 0, "pending": 0}
+    by_type: Dict[str, Dict[str, int]] = {}
+    for s in all_real:
+        o = classify_outcome(s)
+        outcomes[o] += 1
+        t = getattr(s, "signal_type", "buy")
+        by_type.setdefault(t, {"win": 0, "neutral": 0, "loss": 0, "pending": 0})[o] += 1
+    decided = outcomes["win"] + outcomes["loss"]
     return {"total_signals": len(rows),
+            "outcomes": {**outcomes,
+                         "win_rate": round(outcomes["win"] / decided, 3) if decided else None,
+                         "by_type": by_type},
             "groups": {k: finish(v) for k, v in aggs.items()}}
 
 

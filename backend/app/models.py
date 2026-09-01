@@ -184,6 +184,8 @@ class BuySignal(Base):
     day_low: Mapped[float] = mapped_column(Float, nullable=True)
     since_signal_high: Mapped[float] = mapped_column(Float, nullable=True)
     since_signal_low: Mapped[float] = mapped_column(Float, nullable=True)
+    post_window_high: Mapped[float] = mapped_column(Float, nullable=True)  # extremes after the
+    post_window_low: Mapped[float] = mapped_column(Float, nullable=True)   # 7:00 broker window opens
     status: Mapped[str] = mapped_column(String(16), default="active")  # active|closed|invalidated
     signal_type: Mapped[str] = mapped_column(String(8), default="buy")  # buy|watch
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)

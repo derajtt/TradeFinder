@@ -128,6 +128,28 @@ async def record_close_checkpoint(session: AsyncSession, sig: BuySignal,
     await session.flush()
 
 
+def classify_outcome(sig: BuySignal) -> str:
+    """User rule: >= +10% reached after the 7:00 window = win; final change
+    negative = loss; otherwise neutral. 'pending' until post-window data exists."""
+    p0 = sig.buy_signal_price
+    if not p0:
+        return "pending"
+    if sig.post_window_high is not None and sig.post_window_high >= p0 * 1.10:
+        return "win"
+    if sig.post_window_high is None and sig.post_window_low is None:
+        return "pending"
+    cur = sig.current_live_price
+    if cur is not None and cur < p0:
+        return "loss"
+    return "neutral"
+
+
+def update_post_window(sig: BuySignal, price: float) -> None:
+    if price and price > 0:
+        sig.post_window_high = max(sig.post_window_high or price, price)
+        sig.post_window_low = min(sig.post_window_low or price, price)
+
+
 def signal_metrics(sig: BuySignal) -> Dict[str, Any]:
     """Derived, display-only metrics; initiation price untouched."""
     p0 = sig.buy_signal_price
@@ -141,4 +163,7 @@ def signal_metrics(sig: BuySignal) -> Dict[str, Any]:
         out["max_gain_pct"] = round((sig.since_signal_high - p0) / p0 * 100.0, 3)
     if p0 and sig.since_signal_low:
         out["max_drawdown_pct"] = round((sig.since_signal_low - p0) / p0 * 100.0, 3)
+    out["post7_high"] = sig.post_window_high
+    out["post7_low"] = sig.post_window_low
+    out["outcome"] = classify_outcome(sig)
     return out

@@ -101,3 +101,20 @@ async def test_watch_signal_type_recorded(db):
     await db.commit()
     buy = await make(db)     # default type buy, original fingerprint
     assert buy is not None and buy.signal_type == "buy"
+
+
+async def test_outcome_classification(db):
+    from app.signals.service import classify_outcome, update_post_window
+    sig = await make(db)                      # found @ 2.50
+    assert classify_outcome(sig) == "pending"
+    update_post_window(sig, 2.60)             # +4% after window
+    await svc.update_tracking(db, sig, price=2.60, provider_ts=None)
+    assert classify_outcome(sig) == "neutral"
+    update_post_window(sig, 2.80)             # +12% peak after window
+    assert classify_outcome(sig) == "win"     # win even if it fades later
+    sig2 = await make(db, evidence_snapshot={"catalyst": {"catalyst_type": "x",
+                                                          "content_hash": "z2",
+                                                          "source_url": "u"}})
+    update_post_window(sig2, 2.45)
+    await svc.update_tracking(db, sig2, price=2.30, provider_ts=None)
+    assert classify_outcome(sig2) == "loss"   # finished below found price

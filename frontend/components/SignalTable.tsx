@@ -28,6 +28,7 @@ export default function SignalTable({ rows, onSelect, compact }: {
           <th title={TERMS.since_hilo}>Since Hi/Lo</th>
           <th title={TERMS.max_gain}>Max Gain</th>
           <th title={TERMS.max_dd}>Max DD</th>
+          <th className="l" title="WIN = reached +10% after the 7:00 broker window · LOSS = finished below found price · NEUTRAL = in between · PENDING = window not reached yet">Result</th>
           {!compact && <th className="l">Catalyst</th>}
           <th className="l">Initiated</th><th className="l">Status</th>
         </tr></thead>
@@ -50,6 +51,12 @@ export default function SignalTable({ rows, onSelect, compact }: {
                 <td className="dim">{fmtPrice(s.since_high)} / {fmtPrice(s.since_low)}</td>
                 <td className="pos">{fmtPct(s.max_gain_pct)}</td>
                 <td className="neg">{fmtPct(s.max_drawdown_pct)}</td>
+                <td className="l">
+                  {s.outcome === 'win' && <span className="badge buy">WIN</span>}
+                  {s.outcome === 'loss' && <span className="badge risk">LOSS</span>}
+                  {s.outcome === 'neutral' && <span className="badge neutral">NEUTRAL</span>}
+                  {(s.outcome === 'pending' || !s.outcome) && <span className="badge neutral" style={{ opacity: 0.6 }}>pending</span>}
+                </td>
                 {!compact && <td className="l">{s.catalyst_type ? <span className="badge neutral">{s.catalyst_type}</span> : <span className="faint">—</span>}</td>}
                 <td className="l dim" style={{ fontSize: 12 }}>{fmtEtDate(s.initiated_at)}</td>
                 <td className="l"><span className={`badge ${s.status === 'active' ? 'buy' : 'neutral'}`}>{s.status}</span></td>
