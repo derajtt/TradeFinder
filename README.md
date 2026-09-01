@@ -21,6 +21,12 @@ cp .env.example .env
 - Dashboard: **http://localhost:3002** (3000 in Docker; the local bootstrap uses 3002 to avoid clashing with other dev servers)
 - API health: **http://localhost:8000/health**
 
+To keep the site permanently live on macOS (start at login, restart on crash):
+
+```bash
+./scripts/install_launchagents.sh
+```
+
 `bootstrap.sh` picks the right path automatically:
 - **Docker present** → full compose stack (web + api/worker + PostgreSQL), health-checked, detached.
 - **No Docker** → local venv + Node processes with SQLite (identical code paths; SQLAlchemy
