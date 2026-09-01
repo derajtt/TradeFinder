@@ -309,10 +309,10 @@ def compute_market_features(quote: dict, today_pm: List[dict], baselines: List[f
     trade_ts = quote.get("provider_ts")
     book_ts = (amq or {}).get("provider_ts")
     max_age = settings.get("quote_freshness_sec") or 120
+    # Trade freshness comes ONLY from the trade print's own timestamp. Never infer
+    # it from our derived bars — those update every cycle from the (possibly
+    # indicative) book and would mark stale trade prices as fresh.
     fresh = trade_ts is not None and (now_utc() - trade_ts).total_seconds() <= max_age
-    if not fresh and today_pm:
-        last_bar_ts = today_pm[-1]["ts_utc"]
-        fresh = (now_utc() - last_bar_ts).total_seconds() <= 300
     book_fresh = book_ts is not None and (now_utc() - book_ts).total_seconds() <= max_age
     if not fresh and book_fresh:
         bid, ask = (amq or {}).get("bid"), (amq or {}).get("ask")

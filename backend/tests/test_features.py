@@ -81,3 +81,42 @@ def test_estimated_rvol_and_curve():
     assert expected_pm_fraction(600) == 0.065          # after 9:30 clamps to last point
     assert estimated_rvol(0, 1_000_000, 480) is None   # no volume -> no estimate
     assert estimated_rvol(60_000, None, 480) is None   # unknown avg volume -> None
+
+
+def test_stale_trade_uses_live_mid_and_blocks_freshness():
+    """A stale trade print with a live book must display the indicative mid and
+    keep quote_fresh False (no BUY at a stale price)."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from app.scanner.funnel import compute_market_features
+    from app.scoring.engine import DEFAULT_SETTINGS
+
+    now = datetime.now(timezone.utc)
+    et = now.astimezone(ZoneInfo("America/New_York")).replace(hour=5, minute=0)
+    quote = {"price": 0.90, "previous_close": 0.66,
+             "provider_ts": now - timedelta(hours=10)}          # yesterday's print
+    amq = {"bid": 0.78, "ask": 0.80, "provider_ts": now}         # live book
+    bars = [{"ts_utc": now, "minute_of_day": 250 + i, "open": 0.8, "high": 0.81,
+             "low": 0.79, "close": 0.80, "volume": 100} for i in range(5)]
+    f = compute_market_features(quote, bars, [], amq, dict(DEFAULT_SETTINGS), et)
+    assert f["price_indicative"] is True
+    assert abs(f["price"] - 0.79) < 1e-9          # mid of 0.78/0.80
+    assert f["quote_fresh"] is False              # stale trade -> BUY impossible
+    # gap now computed from the live mid, not the stale print
+    assert abs(f["gap_pct"] - ((0.79 - 0.66) / 0.66 * 100)) < 0.01
+
+
+def test_fresh_trade_price_wins_over_mid():
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from app.scanner.funnel import compute_market_features
+    from app.scoring.engine import DEFAULT_SETTINGS
+
+    now = datetime.now(timezone.utc)
+    et = now.astimezone(ZoneInfo("America/New_York")).replace(hour=5, minute=0)
+    quote = {"price": 0.85, "previous_close": 0.66, "provider_ts": now}
+    amq = {"bid": 0.78, "ask": 0.80, "provider_ts": now}
+    f = compute_market_features(quote, [], [], amq, dict(DEFAULT_SETTINGS), et)
+    assert f["price"] == 0.85
+    assert f["price_indicative"] is False
+    assert f["quote_fresh"] is True
