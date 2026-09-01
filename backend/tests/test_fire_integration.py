@@ -70,3 +70,32 @@ async def test_stale_quote_never_fires(db, monkeypatch):
                                     FEATS["catalyst"], [], "2026-09-01")
     n = len((await db.execute(select(BuySignal))).scalars().all())
     assert n == 0
+
+
+async def test_watch_filters_block_extended_and_catalystless(db, monkeypatch):
+    """The loss-reduction rules: no extended spikes, no catalyst-less picks,
+    no below-VWAP fades."""
+    from app.scoring.engine import DEFAULT_SETTINGS
+    s = dict(DEFAULT_SETTINGS)
+    # replicate the watch-eligibility expression used by the scheduler
+    def eligible(feats, result, catalyst):
+        return (s.get("watch_enabled", True)
+                and result["score"] >= (s.get("watch_score_min") or 50)
+                and not result["hard_blocks"]
+                and feats.get("quote_fresh")
+                and (feats.get("pm_volume") or 0) > 0
+                and (feats.get("gap_pct") is None or
+                     feats["gap_pct"] <= (s.get("watch_max_gap_pct") or 100))
+                and catalyst is not None
+                and catalyst.get("direction") == "positive"
+                and catalyst.get("novelty") in ("new", "update")
+                and feats.get("above_vwap") is not False)
+    from app.scoring.engine import score_candidate
+    feats = dict(FEATS)
+    result = score_candidate(feats, s)
+    cat = FEATS["catalyst"]
+    assert eligible(feats, result, cat) is True
+    assert eligible(dict(feats, gap_pct=145.0), result, cat) is False       # extended
+    assert eligible(feats, result, None) is False                            # no catalyst
+    assert eligible(feats, result, dict(cat, novelty="recycled")) is False   # stale story
+    assert eligible(dict(feats, above_vwap=False), result, cat) is False     # fading

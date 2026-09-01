@@ -499,7 +499,17 @@ class Scheduler:
               and result["score"] >= (settings.get("watch_score_min") or 50)
               and not result["hard_blocks"]
               and feats.get("quote_fresh")
-              and (feats.get("pm_volume") or 0) > 0):
+              and (feats.get("pm_volume") or 0) > 0
+              # loss-reduction filters (learned from tracked outcomes):
+              # 1) never chase an already-extended spike
+              and (feats.get("gap_pct") is None or
+                   feats["gap_pct"] <= (settings.get("watch_max_gap_pct") or 100))
+              # 2) a real positive, fresh catalyst must exist
+              and catalyst is not None
+              and catalyst.get("direction") == "positive"
+              and catalyst.get("novelty") in ("new", "update")
+              # 3) buyers must be in control (above VWAP, or VWAP unknown)
+              and feats.get("above_vwap") is not False):
             # WATCH pick: notable but not fully qualified — permanently recorded and
             # tracked from the price it was found at, clearly labeled non-BUY.
             await self._maybe_fire_watch(sym, feats, result, catalyst, session_date)

@@ -36,6 +36,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "momentum_only_mode": False,   # separately-tested strategy, off by default
     "watch_enabled": True,         # record notable candidates as WATCH picks (tracked like signals)
     "watch_score_min": 50,
+    "watch_max_gap_pct": 100.0,    # never chase spikes already up more than this
+
     "openai_monthly_budget_usd": 25.0,
     "paused": False,
 }
