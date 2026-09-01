@@ -3,16 +3,27 @@ import { useEffect, useRef, useState } from 'react';
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000';
+export const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
+
+function authHeaders(): Record<string, string> {
+  return API_KEY ? { 'X-API-Key': API_KEY } : {};
+}
+
+/** Append api_key for URL-only consumers (EventSource, CSV links). */
+export function withKey(url: string): string {
+  if (!API_KEY) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(API_KEY);
+}
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  const r = await fetch(`${API_BASE}${path}`, { cache: 'no-store', headers: authHeaders() });
   if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}`);
   return r.json();
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(`${API_BASE}${path}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}`);
@@ -20,7 +31,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPost<T>(path: string): Promise<T> {
-  const r = await fetch(`${API_BASE}${path}`, { method: 'POST' });
+  const r = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: authHeaders() });
   if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}`);
   return r.json();
 }
@@ -31,7 +42,7 @@ export function useEventStream(handlers: Record<string, (data: any) => void>) {
   ref.current = handlers;
   const [connected, setConnected] = useState(false);
   useEffect(() => {
-    const es = new EventSource(`${API_BASE}/api/stream`);
+    const es = new EventSource(withKey(`${API_BASE}/api/stream`));
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     const names = Object.keys(ref.current);

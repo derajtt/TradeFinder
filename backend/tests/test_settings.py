@@ -36,3 +36,11 @@ async def test_bool_coercion(db):
     s = await update_settings(db, {"momentum_only_mode": "true", "paused": "false"})
     assert s["momentum_only_mode"] is True
     assert s["paused"] is False
+
+
+async def test_api_key_guard_logic():
+    """hmac comparison used by the auth middleware."""
+    from app.main import secrets_compare
+    assert secrets_compare("abc", "abc") is True
+    assert secrets_compare("abc", "abd") is False
+    assert secrets_compare("", "expected") is False

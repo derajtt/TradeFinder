@@ -30,6 +30,7 @@ class AppConfig(BaseSettings):
     paper_mode: bool = True
     cors_origins: str = "http://localhost:3000"
     openai_monthly_budget_usd: float = 25.0
+    api_access_key: str = ""  # when set, /api/* requires X-API-Key header (or ?api_key= for SSE/CSV)
 
     def cors_origin_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

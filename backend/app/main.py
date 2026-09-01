@@ -5,8 +5,9 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import get_config
 from .db import Base, engine
@@ -54,6 +55,23 @@ app.add_middleware(CORSMiddleware,
                    allow_origins=get_config().cors_origin_list(),
                    allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
+
+
+@app.middleware("http")
+async def api_key_guard(request: Request, call_next):
+    """Protects /api/* when API_ACCESS_KEY is configured (public deployments).
+    /health stays open for container health checks. Values are never logged."""
+    required = get_config().api_access_key
+    if required and request.url.path.startswith("/api"):
+        supplied = request.headers.get("x-api-key") or request.query_params.get("api_key") or ""
+        if not secrets_compare(supplied, required):
+            return JSONResponse({"detail": "invalid or missing API key"}, status_code=401)
+    return await call_next(request)
+
+
+def secrets_compare(a: str, b: str) -> bool:
+    import hmac
+    return hmac.compare_digest(a.encode(), b.encode())
 
 
 @app.get("/health")

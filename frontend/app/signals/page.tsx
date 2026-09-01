@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import SignalTable from '../../components/SignalTable';
 import DetailDrawer from '../../components/DetailDrawer';
-import { API_BASE, usePolling } from '../../lib/api';
+import { API_BASE, usePolling, withKey } from '../../lib/api';
 import type { SignalRow } from '../../lib/types';
 
 export default function SignalsPage() {
@@ -24,7 +24,7 @@ export default function SignalsPage() {
         <h2>Signal History</h2>
         <span className="meta">immutable chronological record — corrections are new events, never edits</span>
         <span className="spacer" />
-        <a className="btn" href={`${API_BASE}/api/signals/export.csv`}>Export CSV</a>
+        <a className="btn" href={withKey(`${API_BASE}/api/signals/export.csv`)}>Export CSV</a>
       </div>
       <div style={{ display: 'flex', gap: 10, margin: '0 0 10px' }}>
         <input aria-label="Filter by symbol" placeholder="Symbol…" value={q}
