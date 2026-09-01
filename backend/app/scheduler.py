@@ -296,6 +296,30 @@ class Scheduler:
             live_rows.sort(key=lambda r: r["score"], reverse=True)
             self._last_shortlist = [r["symbol"] for r in live_rows]
             ctx.candidates_live = live_rows
+            # radar tier: every pool mover NOT in the enriched shortlist — full visibility
+            enriched_syms = {r["symbol"] for r in live_rows}
+            radar = []
+            for s_, meta in pool.items():
+                if s_ in enriched_syms:
+                    continue
+                q = quotes.get(s_) or {}
+                gp = meta.get("change_pct")
+                if q.get("price") and q.get("previous_close"):
+                    gp = (q["price"] - q["previous_close"]) / q["previous_close"] * 100
+                radar.append({
+                    "symbol": s_, "name": meta.get("name") or q.get("name", ""),
+                    "exchange": meta.get("exchange") or q.get("exchange", ""),
+                    "price": q.get("price") or meta.get("price"),
+                    "gap_pct": gp,
+                    "volume": q.get("volume"),
+                    "market_cap": q.get("market_cap") or
+                                  self._universe_meta.get(s_, {}).get("market_cap"),
+                    "has_news": s_ in ctx.news_by_symbol,
+                    "provider_ts": (q.get("provider_ts").isoformat()
+                                    if q.get("provider_ts") else None),
+                })
+            radar.sort(key=lambda r: abs(r.get("gap_pct") or 0), reverse=True)
+            ctx.radar_live = radar[:150]
             self.state["candidates"] = len(live_rows)
             self.state["last_cycle_ok"] = True
             async with SessionLocal() as db:
@@ -309,6 +333,7 @@ class Scheduler:
                     run.api_calls = len(ctx.fmp.http.request_log) - api_calls_before
                     await db.commit()
             await broadcaster.publish("candidates", {"rows": live_rows[:60],
+                                                     "radar": ctx.radar_live[:80],
                                                      "phase": phase,
                                                      "ts": now_utc().isoformat()})
         except Exception as e:

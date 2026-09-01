@@ -35,6 +35,7 @@ class ScanContext:
         self.oai = oai
         self.last_cycle: Dict[str, Any] = {}
         self.candidates_live: List[Dict[str, Any]] = []   # latest cycle, served to UI
+        self.radar_live: List[Dict[str, Any]] = []         # movers beyond the enriched tier
         self.news_cache_ts: Optional[datetime] = None
         self.news_by_symbol: Dict[str, List[dict]] = {}
 

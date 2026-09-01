@@ -71,6 +71,7 @@ async def candidates(request: Request):
     shared = app_state(request)
     ctx = shared.get("ctx")
     return {"rows": (ctx.candidates_live if ctx else []),
+            "radar": (getattr(ctx, "radar_live", []) if ctx else []),
             "ts": (ctx.last_cycle.get("ts") if ctx else None)}
 
 
