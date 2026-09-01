@@ -153,7 +153,8 @@ class SessionReplay:
             raw = await self.ai(evidence)
             ext = validate_extraction(raw) if raw else None
         self.ai_cache[basis] = ext
-        await self._db_ai_store(basis, ext)
+        if ext is not None:            # never cache failures — retry next run
+            await self._db_ai_store(basis, ext)
         return ext
 
     async def _db_ai_cache(self, basis: str):

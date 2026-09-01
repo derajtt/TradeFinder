@@ -4,6 +4,9 @@ from app.bt.data import BtData, UniverseEod, trading_sessions
 from app.bt.replay import SessionReplay
 from app.bt.tournament import bootstrap_ci, metrics, run_policy, tournament
 from app.db import SessionLocal
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("btr", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "backtest_run.py"))
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "bt")
 HOLDOUT = trading_sessions("2026-07-01", "2026-08-31")
@@ -15,7 +18,37 @@ async def main():
     uni = UniverseEod(data)
     syms = await data.universe_symbols()
     await uni.load(syms)
-    rp = SessionReplay(data, ai_client=None, universe=uni)  # cached AI reused
+    # AI extractor required — holdout docs have no cached extractions
+    import httpx, json as _json
+    from app.config import get_config
+    from app.strategy.catalyst import ANALYSIS_SCHEMA_V2, SYSTEM_PROMPT_V2
+    cfg = get_config()
+    _client = httpx.AsyncClient(timeout=45)
+    spend = {"usd": 0.0}
+
+    async def ai(evidence: str):
+        if not cfg.openai_api_key or spend["usd"] >= 5.0:
+            return None
+        try:
+            r = await _client.post("https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {cfg.openai_api_key}"},
+                json={"model": "gpt-4o-mini", "temperature": 0,
+                      "messages": [{"role": "system", "content": SYSTEM_PROMPT_V2},
+                                   {"role": "user", "content": evidence[:8000]}],
+                      "response_format": {"type": "json_schema", "json_schema": {
+                          "name": "catalyst_extract_v2", "strict": True,
+                          "schema": ANALYSIS_SCHEMA_V2}}})
+            if r.status_code != 200:
+                return None
+            pl = r.json()
+            u = pl.get("usage", {})
+            spend["usd"] += (u.get("prompt_tokens", 0) * .15 +
+                             u.get("completion_tokens", 0) * .6) / 1e6
+            return _json.loads(pl["choices"][0]["message"]["content"])
+        except Exception:
+            return None
+
+    rp = SessionReplay(data, ai_client=ai, universe=uni)
     trades, summaries = [], []
     t0 = time.time()
     for i, d in enumerate(HOLDOUT):
