@@ -61,8 +61,17 @@ export default function ChartPane({ paneId, defaultSymbol }: {
   const [bars, setBars] = useState<Bar[]>([]);
   const [quality, setQuality] = useState('');
   const [replayIdx, setReplayIdx] = useState<number | null>(null);
-  const [analyze, setAnalyze] = useState(true);
   const [det, setDet] = useState<any>(null);
+  const [auto, setAuto] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('ph_auto') || '') || {}; }
+    catch { return { sr: true, tl: true, pat: true, sig: true, simple: true }; }
+  });
+  const setAutoK = (k: string, v: boolean) => setAuto((s) => {
+    const n = { ...s, [k]: v };
+    try { localStorage.setItem('ph_auto', JSON.stringify(n)); } catch {}
+    return n;
+  });
+  const analyze = auto.sr || auto.tl || auto.pat || auto.sig;
   const [playing, setPlaying] = useState(false);
   const pendingPt = useRef<{ time: number; price: number } | null>(null);
   const drawKey = `ph_draw_${symbol}_${tf}`;
@@ -79,6 +88,19 @@ export default function ChartPane({ paneId, defaultSymbol }: {
     } else setDet(null);
     return () => { alive = false; };
   }, [symbol, tf, analyze]);
+
+  const plain = (s: any) => {
+    const lvl = s.level;
+    if (s.kind === 'buy_breakout')
+      return `BUY — price broke above a ceiling at ${lvl} that had held multiple times, on strong volume`;
+    if (s.kind === 'sell_breakdown')
+      return `SELL — price fell through a floor at ${lvl} that had held multiple times, on strong volume`;
+    if (s.kind === 'buy_double_bottom')
+      return `BUY — price bounced twice off the same floor, then broke out above ${lvl}`;
+    if (s.kind === 'sell_double_top')
+      return `SELL — price hit the same ceiling twice, then broke down through ${lvl}`;
+    return s.reason;
+  };
 
   useEffect(() => {
     if (!playing || replayIdx === null) return;
@@ -156,26 +178,40 @@ export default function ChartPane({ paneId, defaultSymbol }: {
     }
     // ── auto-detected technicals (deterministic, non-repainting) ──
     if (det && replayIdx === null) {
-      for (const z of det.zones ?? []) {
-        candles.createPriceLine({ price: z.level,
-          color: z.kind === 'resistance' ? 'rgba(248,113,113,0.65)' : 'rgba(52,211,153,0.65)',
-          lineWidth: z.touches >= 3 ? 2 : 1, lineStyle: 0, axisLabelVisible: true,
-          title: `${z.kind === 'resistance' ? 'R' : 'S'}×${z.touches}` });
+      const simple = auto.simple !== false;
+      if (auto.sr) {
+        const zones = simple
+          ? [...(det.zones ?? [])].sort((a, b) => b.touches - a.touches).slice(0, 3)
+          : det.zones ?? [];
+        for (const z of zones) {
+          const res = z.kind === 'resistance';
+          candles.createPriceLine({ price: z.level,
+            color: res ? 'rgba(248,113,113,0.65)' : 'rgba(52,211,153,0.65)',
+            lineWidth: z.touches >= 3 ? 2 : 1, lineStyle: 0, axisLabelVisible: true,
+            title: simple ? (res ? 'Ceiling' : 'Floor')
+                          : `${res ? 'R' : 'S'}×${z.touches}` });
+        }
       }
-      for (const t of det.trendlines ?? []) {
-        if (t.t1 == null || t.t2 == null) continue;
-        const s = chart.addLineSeries({ color: t.kind.startsWith('up') ? '#34d399' : '#f87171',
-          lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-        s.setData([{ time: t.t1, value: t.p1 }, { time: t.t2, value: t.p2 }] as any);
+      if (auto.tl) {
+        for (const t of det.trendlines ?? []) {
+          if (t.t1 == null || t.t2 == null) continue;
+          const s = chart.addLineSeries({ color: t.kind.startsWith('up') ? '#34d399' : '#f87171',
+            lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+          s.setData([{ time: t.t1, value: t.p1 }, { time: t.t2, value: t.p2 }] as any);
+        }
       }
-      const sigMarks = (det.signals ?? []).filter((s: any) => s.time != null)
-        .map((s: any) => ({ time: s.time,
-          position: s.kind.startsWith('buy') ? 'belowBar' : 'aboveBar',
-          color: s.kind.startsWith('buy') ? '#34d399' : '#f87171',
-          shape: s.kind.startsWith('buy') ? 'arrowUp' : 'arrowDown',
-          text: s.kind.replace(/_/g, ' ') }));
-      if (sigMarks.length) candles.setMarkers(sigMarks.sort((a: any, b: any) =>
-        (a.time as number) > (b.time as number) ? 1 : -1));
+      if (auto.sig) {
+        const sigs = simple ? (det.signals ?? []).slice(-6) : det.signals ?? [];
+        const sigMarks = sigs.filter((s: any) => s.time != null)
+          .map((s: any) => ({ time: s.time,
+            position: s.kind.startsWith('buy') ? 'belowBar' : 'aboveBar',
+            color: s.kind.startsWith('buy') ? '#34d399' : '#f87171',
+            shape: s.kind.startsWith('buy') ? 'arrowUp' : 'arrowDown',
+            text: simple ? (s.kind.startsWith('buy') ? 'BUY' : 'SELL')
+                         : s.kind.replace(/_/g, ' ') }));
+        if (sigMarks.length) candles.setMarkers(sigMarks.sort((a: any, b: any) =>
+          (a.time as number) > (b.time as number) ? 1 : -1));
+      }
     }
     // saved drawings
     try {
@@ -226,7 +262,7 @@ export default function ChartPane({ paneId, defaultSymbol }: {
       chart.applyOptions({ width: holder.current?.clientWidth ?? 500 }));
     ro.observe(holder.current);
     return () => { ro.disconnect(); chart.remove(); };
-  }, [view, inds, tf, tool, drawKey, det, replayIdx]);
+  }, [view, inds, tf, tool, drawKey, det, replayIdx, auto]);
 
   useEffect(() => { const c = draw(); return c; }, [draw]);
 
@@ -245,11 +281,27 @@ export default function ChartPane({ paneId, defaultSymbol }: {
             style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setTf(t)}>{t}</button>
         ))}
         <span className={`fresh ${quality === 'LIVE' ? 'ok' : 'stale'}`}>{quality}</span>
-        <label style={{ fontSize: 10.5, color: analyze ? 'var(--buy)' : 'var(--text-faint)', cursor: 'pointer' }}
-          title="Automatically detect and draw support/resistance, trendlines, double tops/bottoms, compressions, and volume-confirmed breakout/breakdown signals (deterministic, non-repainting)">
-          <input type="checkbox" checked={analyze} style={{ marginRight: 3 }}
-            onChange={(e) => setAnalyze(e.target.checked)} />🔍 Auto-detect
-        </label>
+        <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', padding: '2px 8px',
+                        border: '1px solid var(--line-soft)', borderRadius: 8 }}>
+          <span className="faint" style={{ fontSize: 9.5, letterSpacing: 1 }}>AUTO</span>
+          {([['sr', 'S/R lines', 'Draw the strongest ceilings (resistance) and floors (support) the price has bounced off'],
+             ['tl', 'Trendlines', 'Draw rising support / falling resistance lines fitted through confirmed swing points'],
+             ['pat', 'Patterns', 'Flag double tops/bottoms and tight compressions below the chart'],
+             ['sig', 'Buy/Sell', 'Mark historical volume-confirmed breakout (BUY) and breakdown (SELL) points']] as const)
+            .map(([k, label, tip]) => (
+            <label key={k} style={{ fontSize: 10.5, cursor: 'pointer',
+                color: auto[k] ? 'var(--buy)' : 'var(--text-faint)' }} title={tip}>
+              <input type="checkbox" checked={!!auto[k]} style={{ marginRight: 3 }}
+                onChange={(e) => setAutoK(k, e.target.checked)} />{label}
+            </label>
+          ))}
+          <label style={{ fontSize: 10.5, cursor: 'pointer',
+              color: auto.simple !== false ? 'var(--accent)' : 'var(--text-faint)' }}
+            title="Simple mode: only the 3 strongest levels and last 6 signals, labeled in plain English (Ceiling / Floor / BUY / SELL). Turn off for the full professional view.">
+            <input type="checkbox" checked={auto.simple !== false} style={{ marginRight: 3 }}
+              onChange={(e) => setAutoK('simple', e.target.checked)} />✨ Simple
+          </label>
+        </span>
         <span className="spacer" style={{ flex: 1 }} />
         {IND_DEFS.map(([k, label]) => (
           <label key={k} style={{ fontSize: 10.5, color: inds[k] ? 'var(--accent)' : 'var(--text-faint)',
@@ -284,14 +336,25 @@ export default function ChartPane({ paneId, defaultSymbol }: {
           <span className="faint" style={{ fontSize: 10 }}>{replayIdx}/{bars.length}</span>
         </>)}
       </div>
-      {det && (det.patterns?.length || det.signals?.length) ? (
+      {det && ((auto.pat && det.patterns?.length) || (auto.sig && det.signals?.length)) ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
-          {(det.patterns ?? []).map((p: any, i: number) => (
-            <span key={`p${i}`} className="badge warn" title={p.note}>{p.type.replace(/_/g, ' ')}</span>
+          {auto.pat && (det.patterns ?? []).map((p: any, i: number) => (
+            <span key={`p${i}`} className="badge warn" title={p.note}>
+              {auto.simple !== false
+                ? (p.type === 'double_top' ? 'hit the same ceiling twice'
+                   : p.type === 'double_bottom' ? 'bounced off the same floor twice'
+                   : p.type === 'compression' ? 'coiling tighter — expansion often follows'
+                   : p.type.replace(/_/g, ' '))
+                : p.type.replace(/_/g, ' ')}
+            </span>
           ))}
-          {(det.signals ?? []).slice(-4).map((s: any, i: number) => (
+          {auto.sig && (det.signals ?? []).slice(-4).map((s: any, i: number) => (
             <span key={`s${i}`} className={`badge ${s.kind.startsWith('buy') ? 'buy' : 'risk'}`}
-              title={s.reason}>{s.kind.replace(/_/g, ' ')} @{s.price}</span>
+              title={auto.simple !== false ? plain(s) : s.reason}>
+              {auto.simple !== false
+                ? `${s.kind.startsWith('buy') ? 'BUY' : 'SELL'} @${s.price}`
+                : `${s.kind.replace(/_/g, ' ')} @${s.price}`}
+            </span>
           ))}
         </div>
       ) : null}
