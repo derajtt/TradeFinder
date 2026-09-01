@@ -64,8 +64,12 @@ async def update_positions(db: AsyncSession, quotes: Dict[str, dict],
     updates = []
     now = now_utc()
     m_now = _et_min(now)
+    # scalper-strategy positions only — model-fleet positions are settled by
+    # strategy.platform.settle_positions with their own exits and ledgers
     open_pos = (await db.execute(select(PaperPosition).where(
-        PaperPosition.status == "open"))).scalars().all()
+        PaperPosition.status == "open",
+        PaperPosition.profile.in_(("primary", "accuracy", "aggressive",
+                                   "penny"))))).scalars().all()
     for pos in open_pos:
         q = quotes.get(pos.symbol)
         if not q or not q.get("price"):
