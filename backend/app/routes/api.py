@@ -21,7 +21,8 @@ from ..models import (AiUsage, BtJob, BuySignal, Candidate,
                       SignalPriceCheckpoint, Symbol, SymbolReferenceVersion)
 from ..analytics import canonical_report, effective_lifecycle
 from ..strategy.profiles import DEFAULT_PROFILES, get_profiles
-from ..models import LockedOutcome, PaperAccount
+from ..models import (AlertRule, EquitySnapshot, JournalEntry, LockedOutcome,
+                      MorningBrief, PaperAccount, Watchlist)
 from ..strategy.registry import (CRYPTO_UNIVERSE, ETF_UNIVERSE, MODELS,
                                  RESEARCH_ONLY, STARTING_CASH)
 from ..scoring.engine import DEFAULT_SETTINGS, STRATEGY_VERSION
@@ -215,8 +216,18 @@ async def signals(active_only: bool = False, include_demo: bool = False,
         q = q.where(BuySignal.is_demo == False)  # noqa: E712
     rows = (await db.execute(q)).scalars().all()
     _settings = await _get_settings(db)
+    pos_map = {p.signal_id: p for p in (await db.execute(
+        select(PaperPosition).where(PaperPosition.signal_id.in_(
+            [s.id for s in rows] or [0])))).scalars().all()}
     out = []
     for s in rows:
+        pos = pos_map.get(s.id)
+        setup = ((s.score_snapshot or {}).get("v2") or {}).get("setup") or {}
+        sell_plan = {
+            "stop": (pos.stop if pos else None) or setup.get("stop"),
+            "target1": (pos.target1 if pos else None) or setup.get("target1"),
+            "target2": (pos.target2 if pos else None) or setup.get("target2"),
+        }
         cps = (await db.execute(select(SignalPriceCheckpoint)
                                 .where(SignalPriceCheckpoint.signal_id == s.id))).scalars().all()
         out.append({
@@ -231,6 +242,7 @@ async def signals(active_only: bool = False, include_demo: bool = False,
             "status": s.status, "is_demo": s.is_demo,
             "signal_type": getattr(s, "signal_type", "buy"),
             "profile": getattr(s, "profile", "primary") or "primary",
+            **sell_plan,
             "lifecycle": getattr(s, "lifecycle", "") or "",
             "score": (s.score_snapshot or {}).get("score"),
             "catalyst_type": ((s.evidence_snapshot or {}).get("catalyst") or {}).get("catalyst_type", ""),
@@ -407,8 +419,27 @@ async def health_detail(request: Request, db: AsyncSession = Depends(get_session
     shared = app_state(request)
     sched = shared.get("scheduler")
     ctx = shared.get("ctx")
+    backup = {"status": "UNKNOWN"}
+    try:
+        import glob as _g
+        import os as _os
+        files = sorted(_g.glob("/app/backups/*.sql.gz"),
+                       key=_os.path.getmtime, reverse=True)
+        if files:
+            age_h = (datetime.now(timezone.utc).timestamp()
+                     - _os.path.getmtime(files[0])) / 3600
+            backup = {"status": "OK" if age_h < 30 else "STALE",
+                      "latest": _os.path.basename(files[0]),
+                      "age_hours": round(age_h, 1),
+                      "size_mb": round(_os.path.getsize(files[0]) / 1e6, 1),
+                      "count": len(files)}
+        else:
+            backup = {"status": "NONE", "note": "no backups found yet"}
+    except Exception:
+        pass
     return {
         "env_status": get_config().provider_status(),
+        "backup": backup,
         "entitlements": (ctx.fmp.entitlements if ctx else {}),
         "endpoints": sorted(by_ep.values(), key=lambda x: (x["provider"], x["endpoint"])),
         "events": [{"ts": e.ts_utc.isoformat(), "level": e.level,
@@ -590,20 +621,25 @@ async def models_list(request: Request, db: AsyncSession = Depends(get_session))
 @router.get("/competition")
 async def competition(db: AsyncSession = Depends(get_session)):
     """The $10,000 leaderboards. Cohort: live forward paper only."""
-    accs = (await db.execute(select(PaperAccount))).scalars().all()
+    accs = {a.model_id: a for a in
+            (await db.execute(select(PaperAccount))).scalars().all()}
     cards = []
-    for a in accs:
-        meta = MODELS.get(a.model_id, {})
-        wr = (a.wins / a.trades_closed) if a.trades_closed else None
-        cards.append({"model_id": a.model_id,
-                      "name": meta.get("name", a.model_id),
+    for mid, meta in MODELS.items():
+        a = accs.get(mid)
+        wr = (a.wins / a.trades_closed) if a and a.trades_closed else None
+        cards.append({"model_id": mid,
+                      "name": meta.get("name", mid),
                       "color": meta.get("color", "#93a1bd"),
                       "experimental": meta.get("experimental", False),
-                      "season": a.season, "equity": a.equity, "cash": a.cash,
-                      "return_pct": round((a.equity / a.starting_cash - 1) * 100, 2),
-                      "realized_pnl": a.realized_pnl,
-                      "max_drawdown_pct": a.max_drawdown_pct,
-                      "trades": a.trades_closed, "wins": a.wins,
+                      "season": a.season if a else 1,
+                      "equity": a.equity if a else STARTING_CASH,
+                      "cash": a.cash if a else STARTING_CASH,
+                      "return_pct": round((a.equity / a.starting_cash - 1) * 100, 2)
+                      if a else 0.0,
+                      "realized_pnl": a.realized_pnl if a else 0.0,
+                      "max_drawdown_pct": a.max_drawdown_pct if a else 0.0,
+                      "trades": a.trades_closed if a else 0,
+                      "wins": a.wins if a else 0,
                       "win_rate": round(wr, 3) if wr is not None else None})
     boards = {}
     with_trades = [c for c in cards if c["trades"] >= 1]
@@ -615,6 +651,14 @@ async def competition(db: AsyncSession = Depends(get_session)):
     boards["drawdown"] = sorted(with_trades,
                                 key=lambda c: c["max_drawdown_pct"],
                                 reverse=True)[:5]
+    snaps = (await db.execute(select(EquitySnapshot)
+                              .order_by(desc(EquitySnapshot.id)).limit(1500)
+                              )).scalars().all()
+    series: Dict[str, list] = {}
+    for sn in reversed(snaps):
+        series.setdefault(sn.model_id, []).append(round(sn.equity, 2))
+    for c in cards:
+        c["spark"] = series.get(c["model_id"], [])[-40:]
     return {"cards": sorted(cards, key=lambda c: c["equity"], reverse=True),
             "leaderboards": boards, "cohort": "live_paper",
             "note": ("Every model starts with $10,000, identical costs and "
@@ -769,8 +813,20 @@ async def ops(request: Request, db: AsyncSession = Depends(get_session)):
         nxt(15, 55, "Intraday paper positions time-exit"),
         nxt(20, 15, "Nightly research replay"),
     ], key=lambda x: x["at_et"])[:5]
+    reg = (getattr(sched, "last_regime", {}) or {}) if sched else {}
+    quiet = None
+    if phase == "closed":
+        quiet = "Market closed — crypto lane keeps running; stocks resume at the next session."
+    elif phase == "premarket" and mins < 420:
+        quiet = "Premarket before 7:00 — qualifying candidates appear as EARLY WATCH only."
+    elif reg.get("state") == "high_risk":
+        quiet = f"Regime controller: high-risk ({reg.get('why')}) — models abstain."
+    elif phase == "afterhours":
+        quiet = "After hours — daily models and crypto only; intraday lanes resume 9:30."
     return {"now_et": t.isoformat(), "phase": phase, "lanes": lanes,
             "upcoming": upcoming,
+            "regime_text": REGIME_TEXT.get(reg.get("state", ""), ""),
+            "quiet_reason": quiet,
             "not_running": [
                 {"what": "Local Mac backend", "why": "droplet owns scanning "
                  "(avoids double API spend); launchd plist kept for fallback"},
@@ -780,3 +836,260 @@ async def ops(request: Request, db: AsyncSession = Depends(get_session)):
                 {"what": "Research-only methods", "why":
                  "HFT/order-flow/short-vol need data feeds this plan lacks"},
             ]}
+
+
+REGIME_TEXT = {
+    "trend": "Trend day: trend/breakout/momentum models active; mean-reversion abstains.",
+    "range": "Range day: mean-reversion and pairs favored; pure trend models abstain.",
+    "high_risk": "High-risk conditions: all models abstain until spreads and volatility normalize.",
+    "uncertain": "Mixed evidence: most models may trade, sizing stays conservative.",
+    "event": "Event-driven tape: catalyst-gated models favored.",
+}
+
+
+@router.get("/digest")
+async def digest(request: Request, db: AsyncSession = Depends(get_session)):
+    """Today vs previous session in one glance."""
+    from ..util.timeutil import is_trading_day, now_et
+    from datetime import timedelta as _td
+    t = now_et()
+    today = str(t.date())
+    d = t.date() - _td(days=1)
+    while not is_trading_day(d):
+        d -= _td(days=1)
+    prev = str(d)
+
+    async def day_counts(day):
+        sigs = (await db.execute(select(BuySignal).where(
+            BuySignal.session_date == day,
+            BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+        rej = (await db.execute(select(func.count(RejectedCandidate.id)).where(
+            RejectedCandidate.session_date == day))).scalar() or 0
+        locks = (await db.execute(
+            select(LockedOutcome.outcome_class, func.count(LockedOutcome.id))
+            .join(BuySignal, BuySignal.id == LockedOutcome.signal_id)
+            .where(BuySignal.session_date == day)
+            .group_by(LockedOutcome.outcome_class))).all()
+        lc = {}
+        for s in sigs:
+            lc[s.lifecycle or "legacy"] = lc.get(s.lifecycle or "legacy", 0) + 1
+        return {"lifecycles": lc, "rejected": rej,
+                "locks": {k: v for k, v in locks},
+                "buys": lc.get("ACTIONABLE_BUY", 0),
+                "early": lc.get("EARLY_WATCH", 0),
+                "watch": lc.get("QUALIFIED_WATCH", 0)}
+
+    t_c, p_c = await day_counts(today), await day_counts(prev)
+    shared = app_state(request)
+    sched = shared.get("scheduler")
+    reg = getattr(sched, "last_regime", {}) if sched else {}
+    wins_t = t_c["locks"].get("WIN_10_TOUCH", 0) + t_c["locks"].get("WIN_NOON_GREEN", 0)
+    line = (f"Today: {t_c['buys']} BUY, {t_c['early']} early, {t_c['watch']} watch, "
+            f"{t_c['rejected']} rejected"
+            + (f", {wins_t}W/{t_c['locks'].get('LOSS_NOON_RED', 0)}L locked at noon"
+               if t_c["locks"] else "")
+            + f" — vs {prev}: {p_c['buys']} BUY, {p_c['rejected']} rejected.")
+    return {"today": {"date": today, **t_c}, "prev": {"date": prev, **p_c},
+            "line": line,
+            "regime_text": REGIME_TEXT.get(reg.get("state", ""), "") +
+                           (f" ({reg.get('why')})" if reg.get("why") else "")}
+
+
+@router.get("/brief")
+async def brief(db: AsyncSession = Depends(get_session)):
+    row = (await db.execute(select(MorningBrief)
+                            .order_by(desc(MorningBrief.id)).limit(1)
+                            )).scalar_one_or_none()
+    if not row:
+        return {"available": False,
+                "note": "First morning brief writes itself at 9:25 AM ET."}
+    return {"available": True, "session_date": row.session_date,
+            "kind": row.kind, "created_at": row.created_at.isoformat(),
+            "content": row.content}
+
+
+@router.get("/journal")
+async def journal_list(symbol: str = "", limit: int = 100,
+                       db: AsyncSession = Depends(get_session)):
+    q = select(JournalEntry).order_by(desc(JournalEntry.id)).limit(min(limit, 400))
+    if symbol:
+        q = q.where(JournalEntry.symbol == symbol.upper())
+    rows = (await db.execute(q)).scalars().all()
+    return {"rows": [{"id": r.id, "created_at": r.created_at.isoformat(),
+                      "symbol": r.symbol, "signal_uid": r.signal_uid,
+                      "note": r.note, "tags": r.tags,
+                      "rules_followed": r.rules_followed, "review": r.review}
+                     for r in rows]}
+
+
+@router.post("/journal")
+async def journal_create(payload: Dict[str, Any],
+                         db: AsyncSession = Depends(get_session)):
+    note = str(payload.get("note", "")).strip()
+    if not note:
+        raise HTTPException(400, "note required")
+    row = JournalEntry(symbol=str(payload.get("symbol", "")).upper()[:16],
+                       signal_uid=str(payload.get("signal_uid", ""))[:40],
+                       note=note[:5000],
+                       tags=[str(x)[:24] for x in payload.get("tags", [])][:10],
+                       rules_followed=bool(payload.get("rules_followed", True)),
+                       review=str(payload.get("review", ""))[:5000])
+    db.add(row)
+    await db.commit()
+    return {"ok": True, "id": row.id}
+
+
+@router.get("/watchlists")
+async def watchlists(db: AsyncSession = Depends(get_session)):
+    rows = (await db.execute(select(Watchlist))).scalars().all()
+    if not rows:
+        db.add(Watchlist(name="Default", symbols=[], notes={}))
+        await db.commit()
+        rows = (await db.execute(select(Watchlist))).scalars().all()
+    return {"rows": [{"id": w.id, "name": w.name, "symbols": w.symbols,
+                      "notes": w.notes} for w in rows]}
+
+
+@router.put("/watchlists/{wl_id}")
+async def watchlist_update(wl_id: int, payload: Dict[str, Any],
+                           db: AsyncSession = Depends(get_session)):
+    w = await db.get(Watchlist, wl_id)
+    if not w:
+        raise HTTPException(404, "watchlist not found")
+    if "symbols" in payload:
+        w.symbols = [str(s).upper()[:16] for s in payload["symbols"]][:100]
+    if "notes" in payload and isinstance(payload["notes"], dict):
+        w.notes = {str(k).upper()[:16]: str(v)[:300]
+                   for k, v in payload["notes"].items()}
+    if "name" in payload:
+        w.name = str(payload["name"])[:48]
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/alerts")
+async def alerts_list(db: AsyncSession = Depends(get_session)):
+    rows = (await db.execute(select(AlertRule)
+                             .order_by(desc(AlertRule.id)).limit(200))).scalars().all()
+    return {"rows": [{"id": r.id, "symbol": r.symbol, "condition": r.condition,
+                      "price": r.price, "note": r.note, "active": r.active,
+                      "fired_at": r.fired_at.isoformat() if r.fired_at else None,
+                      "fired_price": r.fired_price} for r in rows]}
+
+
+@router.post("/alerts")
+async def alerts_create(payload: Dict[str, Any],
+                        db: AsyncSession = Depends(get_session)):
+    try:
+        price = float(payload["price"])
+        symbol = str(payload["symbol"]).upper()[:16]
+        cond = payload.get("condition", "above")
+        assert cond in ("above", "below") and symbol and price > 0
+    except (KeyError, ValueError, AssertionError):
+        raise HTTPException(400, "symbol, condition(above|below), price required")
+    db.add(AlertRule(symbol=symbol, condition=cond, price=price,
+                     note=str(payload.get("note", ""))[:200]))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/alerts/{alert_id}")
+async def alerts_delete(alert_id: int, db: AsyncSession = Depends(get_session)):
+    r = await db.get(AlertRule, alert_id)
+    if r:
+        r.active = False
+        await db.commit()
+    return {"ok": True}
+
+
+@router.get("/feed")
+async def feed(form: str = "", symbol: str = "", limit: int = 80,
+               db: AsyncSession = Depends(get_session)):
+    """Unified news + filings stream with source timestamps."""
+    nq = select(NewsItem).order_by(desc(NewsItem.published_at)).limit(min(limit, 200))
+    fq = select(SecFiling).order_by(desc(SecFiling.accepted_at)).limit(min(limit, 200))
+    if symbol:
+        nq = nq.where(NewsItem.symbol == symbol.upper())
+        fq = fq.where(SecFiling.symbol == symbol.upper())
+    if form:
+        fq = fq.where(SecFiling.form_type == form)
+    news = (await db.execute(nq)).scalars().all()
+    filings = (await db.execute(fq)).scalars().all()
+    items = ([{"kind": "news", "symbol": n.symbol, "ts": n.published_at.isoformat()
+               if n.published_at else None, "title": n.headline,
+               "source": n.source, "url": n.url} for n in news] +
+             [{"kind": "filing", "symbol": f.symbol,
+               "ts": f.accepted_at.isoformat() if f.accepted_at else None,
+               "title": f"{f.form_type} — {f.title or 'filing'}",
+               "source": "SEC EDGAR", "url": f.primary_doc_url,
+               "form": f.form_type} for f in filings])
+    items = [i for i in items if i["ts"]]
+    items.sort(key=lambda i: i["ts"], reverse=True)
+    return {"rows": items[:limit],
+            "forms": sorted({f.form_type for f in filings})}
+
+
+@router.get("/calendar")
+async def calendar(request: Request, db: AsyncSession = Depends(get_session)):
+    from datetime import date as _date, timedelta as _td
+    from ..util.timeutil import half_days, market_holidays
+    shared = app_state(request)
+    ctx = shared.get("ctx")
+    today = _date.today()
+    out = {"earnings": [], "holidays": [], "half_days": []}
+    try:
+        data = await ctx.fmp._get("earnings-calendar",
+                                  {"from": str(today),
+                                   "to": str(today + _td(days=7))},
+                                  cache_ttl=3600, endpoint_name="earnings-cal")
+        for r in (data if isinstance(data, list) else [])[:400]:
+            out["earnings"].append({"symbol": r.get("symbol"),
+                                    "date": r.get("date"),
+                                    "eps_est": r.get("epsEstimated"),
+                                    "rev_est": r.get("revenueEstimated")})
+    except Exception:
+        out["earnings_quality"] = "UNAVAILABLE"
+    for y in (today.year, today.year + 1):
+        out["holidays"] += [str(d) for d in sorted(market_holidays(y))
+                            if d >= today]
+        out["half_days"] += [str(d) for d in sorted(half_days(y)) if d >= today]
+    out["holidays"] = out["holidays"][:8]
+    out["half_days"] = out["half_days"][:4]
+    return out
+
+
+@router.get("/chart/analyze")
+async def chart_analyze(symbol: str, tf: str = "5min", request: Request = None,
+                        db: AsyncSession = Depends(get_session)):
+    """Deterministic pattern detection over the same bars the chart renders."""
+    from ..strategy.charting import detect
+    bars_resp = await chart_bars(symbol, tf, request, db)
+    raw = bars_resp["bars"]
+    bars = [{"o": b["open"], "h": b["high"], "l": b["low"], "c": b["close"],
+             "v": b["volume"], "time": b["time"]} for b in raw]
+    det = detect(bars)
+    for s in det["signals"]:
+        s["time"] = bars[s["i"]]["time"] if 0 <= s["i"] < len(bars) else None
+    for t in det["trendlines"]:
+        t["t1"] = bars[t["i1"]]["time"] if 0 <= t["i1"] < len(bars) else None
+        t["t2"] = bars[t["i2"]]["time"] if 0 <= t["i2"] < len(bars) else None
+    for pat in det["patterns"]:
+        pat["t1"] = bars[pat["i1"]]["time"] if 0 <= pat["i1"] < len(bars) else None
+        pat["t2"] = bars[pat["i2"]]["time"] if 0 <= pat["i2"] < len(bars) else None
+    return {"symbol": symbol.upper(), "tf": tf, "quality": bars_resp["quality"],
+            **det,
+            "note": "confirmed-pivot detection — signals use only data available "
+                    "at their bar; nothing repaints"}
+
+
+@router.get("/backtest/reports")
+async def backtest_reports(db: AsyncSession = Depends(get_session)):
+    """Latest imported report per kind (scalper walk-forward, fleet, nightly)."""
+    rows = (await db.execute(select(BtJob).where(BtJob.status == "done")
+                             .order_by(desc(BtJob.id)).limit(30))).scalars().all()
+    latest: Dict[str, Any] = {}
+    for j in rows:
+        if j.kind not in latest:
+            latest[j.kind] = {"created_at": j.created_at.isoformat(),
+                              "config_hash": j.config_hash, "result": j.result}
+    return {"kinds": list(latest.keys()), "reports": latest}

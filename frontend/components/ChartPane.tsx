@@ -61,6 +61,8 @@ export default function ChartPane({ paneId, defaultSymbol }: {
   const [bars, setBars] = useState<Bar[]>([]);
   const [quality, setQuality] = useState('');
   const [replayIdx, setReplayIdx] = useState<number | null>(null);
+  const [analyze, setAnalyze] = useState(true);
+  const [det, setDet] = useState<any>(null);
   const [playing, setPlaying] = useState(false);
   const pendingPt = useRef<{ time: number; price: number } | null>(null);
   const drawKey = `ph_draw_${symbol}_${tf}`;
@@ -70,8 +72,13 @@ export default function ChartPane({ paneId, defaultSymbol }: {
     apiGet<{ bars: Bar[]; quality: string }>(`/api/chart/bars?symbol=${symbol}&tf=${tf}`)
       .then((r) => { if (alive) { setBars(r.bars); setQuality(r.quality); setReplayIdx(null); } })
       .catch(() => setQuality('UNAVAILABLE'));
+    if (analyze) {
+      apiGet<any>(`/api/chart/analyze?symbol=${symbol}&tf=${tf}`)
+        .then((r) => { if (alive) setDet(r); })
+        .catch(() => setDet(null));
+    } else setDet(null);
     return () => { alive = false; };
-  }, [symbol, tf]);
+  }, [symbol, tf, analyze]);
 
   useEffect(() => {
     if (!playing || replayIdx === null) return;
@@ -147,6 +154,29 @@ export default function ChartPane({ paneId, defaultSymbol }: {
       rs.setData(rsiSeries(closes).map((v, i) => v === null ? null :
         ({ time: times[i], value: v })).filter(Boolean) as any);
     }
+    // ── auto-detected technicals (deterministic, non-repainting) ──
+    if (det && replayIdx === null) {
+      for (const z of det.zones ?? []) {
+        candles.createPriceLine({ price: z.level,
+          color: z.kind === 'resistance' ? 'rgba(248,113,113,0.65)' : 'rgba(52,211,153,0.65)',
+          lineWidth: z.touches >= 3 ? 2 : 1, lineStyle: 0, axisLabelVisible: true,
+          title: `${z.kind === 'resistance' ? 'R' : 'S'}×${z.touches}` });
+      }
+      for (const t of det.trendlines ?? []) {
+        if (t.t1 == null || t.t2 == null) continue;
+        const s = chart.addLineSeries({ color: t.kind.startsWith('up') ? '#34d399' : '#f87171',
+          lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+        s.setData([{ time: t.t1, value: t.p1 }, { time: t.t2, value: t.p2 }] as any);
+      }
+      const sigMarks = (det.signals ?? []).filter((s: any) => s.time != null)
+        .map((s: any) => ({ time: s.time,
+          position: s.kind.startsWith('buy') ? 'belowBar' : 'aboveBar',
+          color: s.kind.startsWith('buy') ? '#34d399' : '#f87171',
+          shape: s.kind.startsWith('buy') ? 'arrowUp' : 'arrowDown',
+          text: s.kind.replace(/_/g, ' ') }));
+      if (sigMarks.length) candles.setMarkers(sigMarks.sort((a: any, b: any) =>
+        (a.time as number) > (b.time as number) ? 1 : -1));
+    }
     // saved drawings
     try {
       const saved = JSON.parse(localStorage.getItem(drawKey) || '[]');
@@ -196,7 +226,7 @@ export default function ChartPane({ paneId, defaultSymbol }: {
       chart.applyOptions({ width: holder.current?.clientWidth ?? 500 }));
     ro.observe(holder.current);
     return () => { ro.disconnect(); chart.remove(); };
-  }, [view, inds, tf, tool, drawKey]);
+  }, [view, inds, tf, tool, drawKey, det, replayIdx]);
 
   useEffect(() => { const c = draw(); return c; }, [draw]);
 
@@ -215,6 +245,11 @@ export default function ChartPane({ paneId, defaultSymbol }: {
             style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setTf(t)}>{t}</button>
         ))}
         <span className={`fresh ${quality === 'LIVE' ? 'ok' : 'stale'}`}>{quality}</span>
+        <label style={{ fontSize: 10.5, color: analyze ? 'var(--buy)' : 'var(--text-faint)', cursor: 'pointer' }}
+          title="Automatically detect and draw support/resistance, trendlines, double tops/bottoms, compressions, and volume-confirmed breakout/breakdown signals (deterministic, non-repainting)">
+          <input type="checkbox" checked={analyze} style={{ marginRight: 3 }}
+            onChange={(e) => setAnalyze(e.target.checked)} />🔍 Auto-detect
+        </label>
         <span className="spacer" style={{ flex: 1 }} />
         {IND_DEFS.map(([k, label]) => (
           <label key={k} style={{ fontSize: 10.5, color: inds[k] ? 'var(--accent)' : 'var(--text-faint)',
@@ -249,6 +284,17 @@ export default function ChartPane({ paneId, defaultSymbol }: {
           <span className="faint" style={{ fontSize: 10 }}>{replayIdx}/{bars.length}</span>
         </>)}
       </div>
+      {det && (det.patterns?.length || det.signals?.length) ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+          {(det.patterns ?? []).map((p: any, i: number) => (
+            <span key={`p${i}`} className="badge warn" title={p.note}>{p.type.replace(/_/g, ' ')}</span>
+          ))}
+          {(det.signals ?? []).slice(-4).map((s: any, i: number) => (
+            <span key={`s${i}`} className={`badge ${s.kind.startsWith('buy') ? 'buy' : 'risk'}`}
+              title={s.reason}>{s.kind.replace(/_/g, ' ')} @{s.price}</span>
+          ))}
+        </div>
+      ) : null}
       <div ref={holder} style={{ width: '100%' }} />
     </div>
   );

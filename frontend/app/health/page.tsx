@@ -4,6 +4,7 @@ import { fmtEtDate } from '../../lib/format';
 
 interface Health {
   env_status: Record<string, boolean>;
+  backup?: { status: string; latest?: string; age_hours?: number; size_mb?: number; count?: number; note?: string };
   entitlements: Record<string, { ok: boolean; status: number }>;
   endpoints: { provider: string; endpoint: string; calls: number; ok: number;
     last_status: number; last_ts: string; avg_latency_ms: number; last_count: number }[];
@@ -21,6 +22,16 @@ export default function HealthPage() {
       <div className="sect"><h2>System Health</h2>
         <span className="meta">scheduler phase: {h.scheduler?.phase} · cycle #{h.scheduler?.cycles}</span></div>
 
+      {h.backup && (
+        <div className="kv" style={{ maxWidth: 380, marginBottom: 12 }}>
+          <div className="k">Database backups</div>
+          <div className="v" style={{ color: h.backup.status === 'OK' ? 'var(--buy)' : h.backup.status === 'NONE' ? 'var(--warn)' : 'var(--risk)' }}>
+            {h.backup.status}{h.backup.latest && <span className="faint" style={{ fontSize: 10, marginLeft: 8 }}>
+              {h.backup.latest} · {h.backup.age_hours}h old · {h.backup.size_mb}MB · {h.backup.count} kept</span>}
+            {h.backup.note && <span className="faint" style={{ fontSize: 10, marginLeft: 8 }}>{h.backup.note}</span>}
+          </div>
+        </div>
+      )}
       <div className="sect"><h2 style={{ fontSize: 13 }}>FMP plan entitlements</h2>
         <span className="meta">endpoints probed live against the paid account</span></div>
       <div className="kv-grid">

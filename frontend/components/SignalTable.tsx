@@ -24,6 +24,7 @@ export default function SignalTable({ rows, onSelect, compact }: {
           <th title={TERMS.score}>Score</th>
           <th title={TERMS.buy_price}>Found @</th>
           <th title={TERMS.current}>Current</th>
+          <th title="The paper sell plan recorded at signal time: protective stop / first target (50% off + stop to breakeven) / second target">Stop · T1 · T2</th>
           <th title={TERMS.change}>Change</th>
           <th title={TERMS.day_hilo}>Day Hi/Lo</th>
           <th title={TERMS.since_hilo}>Since Hi/Lo</th>
@@ -49,6 +50,13 @@ export default function SignalTable({ rows, onSelect, compact }: {
                 <td><Score v={s.score} /></td>
                 <td title={`Immutable initiation price · ${s.price_source}`}><b>{fmtPrice(s.buy_price)}</b></td>
                 <td>{fmtPrice(s.current)} <Freshness ts={s.current_ts} /></td>
+                <td style={{ fontSize: 11.5 }}>
+                  <span className="neg">{fmtPrice(s.stop)}</span>
+                  <span className="faint"> · </span>
+                  <span className="pos">{fmtPrice(s.target1)}</span>
+                  <span className="faint"> · </span>
+                  <span className="pos">{fmtPrice(s.target2)}</span>
+                </td>
                 <td className={chg == null ? '' : chg >= 0 ? 'pos' : 'neg'}>{fmtPct(chg)}</td>
                 <td className="dim">{fmtPrice(s.day_high)} / {fmtPrice(s.day_low)}</td>
                 <td className="dim">{fmtPrice(s.since_high)} / {fmtPrice(s.since_low)}</td>

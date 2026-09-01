@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { fmtCompact, fmtNum, fmtPct, fmtPrice } from '../lib/format';
+import { usePolling } from '../lib/api';
 import type { CandidateRow } from '../lib/types';
 import { TERMS } from '../lib/terms';
 import Freshness from './Freshness';
@@ -53,11 +54,12 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
     else { setSort(k); setDir(-1); }
   };
 
+  const [ops] = usePolling<{ quiet_reason?: string | null }>('/api/ops', 60000);
   if (!rows.length) {
     return (
       <div className="tbl-wrap"><div className="empty">
-        <b>No candidates yet</b>
-        The scanner surfaces symbols here as soon as premarket movers pass the universe gates.
+        <b>No candidates right now</b>
+        {ops?.quiet_reason ?? 'The scanner surfaces symbols here as soon as premarket movers pass the universe gates.'}
       </div></div>
     );
   }

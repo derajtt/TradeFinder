@@ -34,6 +34,7 @@ export interface SignalRow {
   change_abs: number | null; change_pct: number | null;
   max_gain_pct: number | null; max_drawdown_pct: number | null;
   outcome?: string; post7_high?: number | null; post7_low?: number | null;
+  stop?: number | null; target1?: number | null; target2?: number | null;
 }
 
 export interface Outcomes {

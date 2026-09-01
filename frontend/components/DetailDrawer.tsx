@@ -130,6 +130,7 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
           <div className="subhead">Chart — accumulated 1-min bars</div>
           <Chart bars={d.bars} buyPrice={sig?.buy_price} vwap={feats.vwap}
                  pmHigh={feats.pm_high} pmLow={feats.pm_low}
+                 stop={(sig as any)?.stop} target1={(sig as any)?.target1} target2={(sig as any)?.target2}
                  watchStart={d.watch ? Math.floor(Date.parse(d.watch.started_at) / 1000) : null} />
 
           {(live?.explain?.length || scoreDetail?.explain?.length) ? (<>
@@ -210,6 +211,12 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
               <KV k="Change" v={fmtPct(sig.change_pct)} cls={(sig.change_pct ?? 0) >= 0 ? 'pos' : 'neg'} />
               <KV k="Max gain" v={fmtPct(sig.max_gain_pct)} cls="pos" />
               <KV k="Max drawdown" v={fmtPct(sig.max_drawdown_pct)} cls="neg" />
+              <KV k="Sell plan — Stop" v={fmtPrice((sig as any).stop)} cls="neg"
+                 tip="Protective stop from the signal's setup; the paper position exits here." />
+              <KV k="Target 1 (partial)" v={fmtPrice((sig as any).target1)} cls="pos"
+                 tip="First objective — 50% off and stop moves to breakeven." />
+              <KV k="Target 2 (close)" v={fmtPrice((sig as any).target2)} cls="pos"
+                 tip="Second objective — remaining position exits." />
               <KV k="Initiated" v={fmtEtDate(sig.initiated_at)} mono={false} />
               <KV k="Early-Window High / Low" v={`${fmtPrice(sig.post7_high)} / ${fmtPrice(sig.post7_low)}`}
                  tip="Extremes during the first minutes after the pick became tradable — the ONLY basis for WIN/LOSS." />

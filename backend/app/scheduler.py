@@ -17,9 +17,10 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 
 from .db import SessionLocal
-from .models import (BuySignal, Candidate, CandidateFeatureSnapshot, HealthEvent,
-                     PaperPosition, ProviderRequest, RejectedCandidate,
-                     ScannerRun, SecFiling)
+from .models import (AlertRule, BuySignal, Candidate, CandidateFeatureSnapshot,
+                     EquitySnapshot, HealthEvent, LockedOutcome, MorningBrief,
+                     PaperAccount, PaperPosition, ProviderRequest,
+                     RejectedCandidate, ScannerRun, SecFiling)
 from .providers.fmp import looks_common_stock
 from .providers.fmp import EntitlementError
 from .scanner import bars as barmod
@@ -898,6 +899,89 @@ class Scheduler:
             await self._health("info", "models", f"{fired} model signal(s) fired "
                                f"(regime {reg_state})")
 
+    _last_snap = 0.0
+
+    async def _equity_snapshots(self, db):
+        import time as _t
+        if _t.monotonic() - self._last_snap < 600:
+            return
+        self._last_snap = _t.monotonic()
+        from sqlalchemy import select as _sel
+        accs = (await db.execute(_sel(PaperAccount))).scalars().all()
+        for a in accs:
+            db.add(EquitySnapshot(model_id=a.model_id, equity=a.equity))
+
+    async def _check_alerts(self, db, quotes):
+        from sqlalchemy import select as _sel
+        rules = (await db.execute(_sel(AlertRule).where(
+            AlertRule.active == True,  # noqa: E712
+            AlertRule.fired_at.is_(None)))).scalars().all()
+        for r in rules:
+            q = quotes.get(r.symbol)
+            px = (q or {}).get("price")
+            if px is None:
+                continue
+            hit = px >= r.price if r.condition == "above" else px <= r.price
+            if hit:
+                r.fired_at = now_utc()
+                r.fired_price = px
+                await self._health("info", "alerts",
+                                   f"ALERT {r.symbol} {r.condition} {r.price} "
+                                   f"@ {px} {('— ' + r.note) if r.note else ''}")
+                await broadcaster.publish("alert", {
+                    "symbol": r.symbol, "condition": r.condition,
+                    "price": r.price, "fired_price": px, "note": r.note})
+
+    async def _maybe_morning_brief(self, db):
+        """9:25 AM ET on trading days: the system writes its own premarket
+        debrief before the open."""
+        t = now_et()
+        if not (t.hour == 9 and 25 <= t.minute <= 35) or not is_trading_day(t.date()):
+            return
+        today = str(t.date())
+        from sqlalchemy import select as _sel
+        exists = (await db.execute(_sel(MorningBrief.id).where(
+            MorningBrief.session_date == today,
+            MorningBrief.kind == "morning"))).first()
+        if exists:
+            return
+        sigs = (await db.execute(_sel(BuySignal).where(
+            BuySignal.session_date == today,
+            BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+        rej = (await db.execute(_sel(RejectedCandidate).where(
+            RejectedCandidate.session_date == today))).scalars().all()
+        pos = (await db.execute(_sel(PaperPosition).where(
+            PaperPosition.status == "open"))).scalars().all()
+        early = [s for s in sigs if s.lifecycle == "EARLY_WATCH"]
+        buys = [s for s in sigs if s.lifecycle == "ACTIONABLE_BUY"]
+        watch = [s for s in sigs if s.lifecycle == "QUALIFIED_WATCH"]
+        from collections import Counter
+        top_rej = Counter()
+        for r in rej:
+            for g in (r.failed_gates or [])[:2]:
+                top_rej[g] += 1
+        content = {
+            "headline": (f"{len(buys)} actionable BUY(s), {len(early)} early "
+                         f"watch(es), {len(watch)} qualified watch(es), "
+                         f"{len(rej)} rejected this premarket."),
+            "regime": self.last_regime,
+            "buys": [{"symbol": s.symbol, "profile": s.profile,
+                      "price": s.buy_signal_price,
+                      "time_et": s.initiated_at.astimezone(ET).strftime("%H:%M")
+                      if s.initiated_at else None} for s in buys[:10]],
+            "early_watches": [{"symbol": s.symbol, "price": s.buy_signal_price}
+                              for s in early[:10]],
+            "carried_positions": [{"symbol": p.symbol, "model": p.profile,
+                                   "entry": p.entry_fill, "stop": p.stop}
+                                  for p in pos[:10]],
+            "top_rejection_reasons": top_rej.most_common(5),
+            "noon_locks_pending": len(buys) + len(early) + len(watch),
+            "note": "Auto-generated at 9:25 ET. Noon outcomes lock at 12:00.",
+        }
+        db.add(MorningBrief(session_date=today, kind="morning", content=content))
+        await self._health("info", "brief", f"morning brief written: "
+                           f"{content['headline']}")
+
     async def _nightly_research(self, settings):
         """After-close research: replay the completed day through the frozen
         engine, update challenger stats, and audit-log the promotion decision.
@@ -1031,6 +1115,9 @@ class Scheduler:
                     await self._health("info", "outcomes",
                                        f"{locked} noon outcome(s) locked "
                                        f"({mplat.NOON_POLICY})")
+                await self._equity_snapshots(db)
+                await self._check_alerts(db, quotes)
+                await self._maybe_morning_brief(db)
             except Exception as e:
                 pos_updates = []
                 await self._health("warn", "paper", f"{type(e).__name__}: {e}")

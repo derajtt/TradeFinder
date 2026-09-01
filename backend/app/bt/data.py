@@ -140,8 +140,10 @@ class BtData:
             "historical-price-eod/full", {"symbol": symbol, "from": "2024-01-01",
                                           "to": "2026-12-31"}))
         rows = data if isinstance(data, list) else []
-        return [{"date": r.get("date"), "open": r.get("open"), "close": r.get("close"),
-                 "volume": r.get("volume")} for r in rows]
+        return [{"date": r.get("date"), "open": r.get("open"),
+                 "high": r.get("high"), "low": r.get("low"),
+                 "close": r.get("close"), "volume": r.get("volume")}
+                for r in rows]
 
     async def prev_close(self, symbol: str, d: str) -> Optional[float]:
         series = await self.eod(symbol)

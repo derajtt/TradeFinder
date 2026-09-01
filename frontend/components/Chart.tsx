@@ -4,10 +4,12 @@ import { createChart, ColorType, type IChartApi, type UTCTimestamp } from 'light
 
 export interface Bar { time: number; open: number; high: number; low: number; close: number; volume: number; }
 
-export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow, watchStart }: {
+export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow, watchStart,
+  stop, target1, target2 }: {
   bars: Bar[]; buyPrice?: number | null; buyTime?: number | null;
   vwap?: number | null; pmHigh?: number | null; pmLow?: number | null;
-  watchStart?: number | null;
+  watchStart?: number | null; stop?: number | null; target1?: number | null;
+  target2?: number | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -36,6 +38,9 @@ export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow, wa
     const line = (price: number, color: string, title: string, style = 2) =>
       candles.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title });
     if (buyPrice) line(buyPrice, '#34d399', 'BUY', 0);
+    if (stop) line(stop, '#f87171', 'STOP', 0);
+    if (target1) line(target1, '#34d399', 'T1');
+    if (target2) line(target2, '#34d399', 'T2');
     if (vwap) line(vwap, '#38bdf8', 'VWAP');
     if (pmHigh) line(pmHigh, '#fbbf24', 'PM H');
     if (pmLow) line(pmLow, '#8b98b4', 'PM L');
@@ -55,7 +60,7 @@ export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow, wa
     const ro = new ResizeObserver(() => chart.applyOptions({ width: ref.current?.clientWidth ?? 600 }));
     ro.observe(ref.current);
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [bars, buyPrice, buyTime, vwap, pmHigh, pmLow, watchStart]);
+  }, [bars, buyPrice, buyTime, vwap, pmHigh, pmLow, watchStart, stop, target1, target2]);
 
   if (!bars.length) {
     return <div className="empty" style={{ border: '1px solid var(--line)', borderRadius: 12 }}>

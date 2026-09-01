@@ -6,6 +6,7 @@ import SessionStrip from '../components/SessionStrip';
 import FunnelStrip from '../components/FunnelStrip';
 import NoonCard from '../components/NoonCard';
 import OpsPanel from '../components/OpsPanel';
+import DigestCard from '../components/DigestCard';
 import ProfileTabs from '../components/ProfileTabs';
 import PositionsTable from '../components/PositionsTable';
 import RejectedTable from '../components/RejectedTable';
@@ -68,6 +69,7 @@ export default function Dashboard() {
     <>
       <SessionStrip confirmAt="07:00" />
       <OpsPanel />
+      <DigestCard />
       <ProfileTabs />
       <FunnelStrip profile={profile} />
       <div className="cards">

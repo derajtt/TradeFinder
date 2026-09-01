@@ -16,6 +16,9 @@ function M({ m }: { m: any }) {
 
 export default function BacktestPage() {
   const [r] = usePolling<any>('/api/backtest/report', 60000);
+  const [all] = usePolling<any>('/api/backtest/reports', 60000);
+  const fleet = all?.reports?.fleet?.result;
+  const nightly = all?.reports?.nightly?.result;
   if (!r) return <div className="skel" style={{ height: 300, marginTop: 20 }} />;
   if (!r.available) {
     return (<><div className="sect"><h2>Backtesting</h2></div>
@@ -77,6 +80,33 @@ export default function BacktestPage() {
         <div className="kv"><div className="k">Jitter robust</div><div className="v">{String(res.search?.jitter_ok ?? '—')}</div></div>
         <div className="kv"><div className="k">API calls / cache hits</div><div className="v">{res.api_calls} / {res.cache_hits}</div></div>
       </div>
+      {fleet && (<>
+        <div className="sect"><h2 style={{ fontSize: 13 }}>Fleet backtests — every daily-testable model</h2>
+          <span className="meta">{fleet.cohort} · {fleet.sessions} sessions ({fleet.date_range?.join(' → ')}) · {fleet.trades_total} trades · frozen first-pass settings, no tuning</span></div>
+        <div className="tbl-wrap"><table className="tbl" style={{ minWidth: 820 }}>
+          <thead><tr><th className="l">Model</th><th>n</th><th>WR (LB)</th><th>Expectancy</th>
+            <th>PF</th><th>Max DD</th><th>Ambig.</th><th title="expectancy in first vs second half — stability check">H1 / H2 exp</th></tr></thead>
+          <tbody>{Object.entries(fleet.by_model ?? {}).map(([mid, m]: any) => (
+            <tr key={mid} style={{ cursor: 'default' }}>
+              <td className="l">{mid.replace(/_/g, ' ')}</td>
+              <td>{m.n}</td>
+              <td>{m.win_rate != null ? (m.win_rate * 100).toFixed(0) + '%' : '—'}
+                <span className="faint"> ({m.win_rate_lb != null ? (m.win_rate_lb * 100).toFixed(0) : '—'})</span></td>
+              <td className={(m.expectancy_pct ?? 0) >= 0 ? 'pos' : 'neg'}>{m.expectancy_pct}%</td>
+              <td>{m.profit_factor}</td><td className="neg">{m.max_drawdown_pct}%</td>
+              <td className="dim">{m.ambiguous}</td>
+              <td className="dim">{m.first_half_exp}% / {m.second_half_exp}%</td>
+            </tr>))}</tbody>
+        </table></div>
+        <p className="disclaimer">Forward-only (cannot be honestly tested on daily bars): {(fleet.forward_only_models ?? []).map((x: string) => x.replace(/_/g, ' ')).join(', ')}.
+          Negative baselines are shown as-is — engines are NOT retuned to fit history; live paper decides.</p>
+      </>)}
+      {nightly && (<>
+        <div className="sect"><h2 style={{ fontSize: 13 }}>Nightly research — latest run</h2></div>
+        <div className="tl-item" style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>
+          {JSON.stringify(nightly.replay ?? nightly)} · promotion: {nightly.promotion?.decision} ({nightly.promotion?.reason})
+        </div>
+      </>)}
       <p className="disclaimer">Backtests use estimated spreads and next-bar fills on 5-minute data; they are evidence, not proof.
         Nothing here is promoted to the live paper strategy without walk-forward + holdout + forward paper confirmation.</p>
     </>

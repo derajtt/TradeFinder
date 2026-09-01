@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { usePolling } from '../lib/api';
 
 interface Ops {
-  now_et: string; phase: string;
+  now_et: string; phase: string; regime_text?: string; quiet_reason?: string | null;
   lanes: { lane: string; state: string; detail: string }[];
   upcoming: { event: string; at_et: string }[];
   not_running: { what: string; why: string }[];
@@ -35,6 +35,12 @@ export default function OpsPanel() {
       </div>
       {open && (
         <>
+          {(ops.regime_text || ops.quiet_reason) && (
+            <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              {ops.regime_text && <span>🧭 {ops.regime_text} </span>}
+              {ops.quiet_reason && <span className="faint">· {ops.quiet_reason}</span>}
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 8, marginTop: 10 }}>
             {ops.lanes.map((l) => (
               <div key={l.lane} className="gate" style={{ alignItems: 'flex-start' }} title={l.detail}>

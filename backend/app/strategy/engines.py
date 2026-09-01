@@ -62,7 +62,8 @@ def regime(ctx) -> Dict[str, Any]:
             "atr_pct": round(atr_pct, 2)}
 
 
-REGIME_ALLOW = {   # which regimes each engine may trade (blueprint table)
+REGIME_ALLOW = {
+    "chartpat": {"trend", "range", "uncertain"},   # which regimes each engine may trade (blueprint table)
     "confluence": {"trend", "range", "uncertain"},
     "pairs": {"range", "uncertain", "trend"},
     "trend": {"trend"},
@@ -456,8 +457,36 @@ def rsreclaim(ctx, sym, cfg) -> Optional[dict]:
                "swing")
 
 
+# ── Model 16: Chart Patterns (uses the workstation's own detector) ─────
+def chartpat(ctx, sym, cfg) -> Optional[dict]:
+    from .charting import detect
+    d = _bars(ctx, sym, "daily")
+    m5 = _bars(ctx, sym, "5m")
+    src_bars = d[-90:] if len(d) >= 40 else None
+    if not src_bars:
+        return None
+    det = detect(src_bars)
+    fresh = [s for s in det["signals"]
+             if s["kind"].startswith("buy") and s["i"] >= len(src_bars) - 2]
+    if not fresh:
+        return None
+    sig = fresh[-1]
+    px = (m5[-1]["c"] if m5 else src_bars[-1]["c"])
+    level = sig["level"]
+    if px <= level or (px - level) / level * 100 > float(cfg.get("max_ext_pct", 3.0)):
+        return None
+    sup_below = [z["level"] for z in det["zones"]
+                 if z["kind"] == "support" and z["level"] < px]
+    stop = max(sup_below) if sup_below else level * 0.985
+    return _mk("buy", px, stop, px + 1.5 * (px - stop),
+               60 + min(20, len(fresh) * 5), sig["kind"],
+               {"detector": sig["reason"], "level": level,
+                "zones": len(det["zones"]),
+                "patterns": [p["type"] for p in det["patterns"]]}, "swing")
+
+
 ENGINES = {"confluence": confluence, "pairs": pairs, "trend": trend,
            "earnings": earnings, "meanrev": meanrev, "resmom": resmom,
            "factor": factor, "insider": insider, "orb": orb,
            "breakout": breakout, "gaussian": gaussian, "vacuum": vacuum,
-           "opendrive": opendrive, "rsreclaim": rsreclaim}
+           "opendrive": opendrive, "rsreclaim": rsreclaim, "chartpat": chartpat}

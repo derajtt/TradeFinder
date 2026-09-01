@@ -80,3 +80,30 @@ async def test_noon_outcome_policy(db, monkeypatch):
     # immutable: second run locks nothing new
     n2 = await plat.finalize_noon_outcomes(db, {"NOON": {"price": 1.90}})
     assert n2 == 0
+
+
+def test_charting_detects_and_never_repaints():
+    from app.strategy.charting import detect
+    import random
+    rng = random.Random(5)
+    bars = []
+    px = 10.0
+    # build a range with a hard ceiling at ~11 touched 3 times, then break it
+    for i in range(60):
+        target = 11.0 if i % 12 in (5, 6) else 10.2 + rng.uniform(-0.2, 0.2)
+        px = px * 0.6 + target * 0.4
+        bars.append({"o": px * 0.995, "h": min(px * 1.01, 11.02),
+                     "l": px * 0.985, "c": px, "v": 1000})
+    for i in range(6):  # breakout on volume
+        px *= 1.02
+        bars.append({"o": px * 0.99, "h": px * 1.01, "l": px * 0.985,
+                     "c": px, "v": 4000})
+    det = detect(bars)
+    assert any(z["kind"] == "resistance" for z in det["zones"])
+    buys = [s for s in det["signals"] if s["kind"] == "buy_breakout"]
+    assert buys, det["signals"]
+    # no-repaint: rerunning on a truncated series never yields signals beyond it
+    det_trunc = detect(bars[:58])
+    assert all(s["i"] < 58 for s in det_trunc["signals"])
+    from app.strategy.engines import ENGINES
+    assert "chartpat" in ENGINES

@@ -447,3 +447,59 @@ class LockedOutcome(Base):
     revision_reason: Mapped[str] = mapped_column(String(200), default="")
     __table_args__ = (UniqueConstraint("signal_id", "policy", "revision_of",
                                        name="uq_lock"),)
+
+
+class EquitySnapshot(Base):
+    """Periodic per-model equity marks for sparklines and audit."""
+    __tablename__ = "equity_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_id: Mapped[str] = mapped_column(String(32), index=True)
+    ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    equity: Mapped[float] = mapped_column(Float)
+
+
+class JournalEntry(Base):
+    """Trade journal: notes joined to signals/symbols with review tags."""
+    __tablename__ = "journal_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    symbol: Mapped[str] = mapped_column(String(16), default="", index=True)
+    signal_uid: Mapped[str] = mapped_column(String(40), default="", index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    rules_followed: Mapped[bool] = mapped_column(Boolean, default=True)
+    review: Mapped[str] = mapped_column(Text, default="")
+
+
+class Watchlist(Base):
+    __tablename__ = "watchlists"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(48), unique=True)
+    symbols: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[dict] = mapped_column(JSON, default=dict)   # symbol -> note
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AlertRule(Base):
+    """In-app price alerts checked by the tracking cycle; no SMS/email needed."""
+    __tablename__ = "alert_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    condition: Mapped[str] = mapped_column(String(8), default="above")  # above|below
+    price: Mapped[float] = mapped_column(Float)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    fired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    fired_price: Mapped[float] = mapped_column(Float, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class MorningBrief(Base):
+    """Auto-generated 9:25 AM premarket debrief + nightly summaries."""
+    __tablename__ = "morning_briefs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_date: Mapped[str] = mapped_column(String(10), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="morning")  # morning|nightly
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (UniqueConstraint("session_date", "kind", name="uq_brief"),)

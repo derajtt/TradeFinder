@@ -5,7 +5,23 @@ import { fmtNum, fmtPrice } from '../../lib/format';
 
 interface Card { model_id: string; name: string; color: string; experimental: boolean;
   season: number; equity: number; cash: number; return_pct: number; realized_pnl: number;
-  max_drawdown_pct: number; trades: number; wins: number; win_rate: number | null; }
+  max_drawdown_pct: number; trades: number; wins: number; win_rate: number | null;
+  spark?: number[]; }
+
+function Spark({ pts, color }: { pts: number[]; color: string }) {
+  if (!pts || pts.length < 3) return null;
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const rng = Math.max(1e-9, max - min);
+  const path = pts.map((v, i) =>
+    `${(i / (pts.length - 1)) * 100},${28 - ((v - min) / rng) * 24}`).join(' ');
+  return (
+    <svg viewBox="0 0 100 30" style={{ width: '100%', height: 30, marginTop: 4 }}
+      preserveAspectRatio="none" aria-hidden>
+      <polyline points={path} fill="none" stroke={color} strokeWidth="1.5"
+        vectorEffect="non-scaling-stroke" opacity="0.85" />
+    </svg>
+  );
+}
 interface Comp { cards: Card[]; leaderboards: Record<string, Card[]>; note: string; }
 interface ResearchOnly { id: string; name: string; why_not: string; }
 
@@ -41,6 +57,7 @@ export default function CompetitionPage() {
                 equity <b className="m">{fmtPrice(c.equity)}</b> · dd <span className="neg">{c.max_drawdown_pct}%</span><br />
                 {c.trades} trades{c.win_rate != null && <> · WR {(c.win_rate * 100).toFixed(0)}%</>} · season {c.season}
               </div>
+              <Spark pts={c.spark ?? []} color={c.color} />
             </div>
           </Link>
         ))}

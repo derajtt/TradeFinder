@@ -97,6 +97,16 @@ MODELS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+MODELS["chart_patterns"] = {
+    "name": "Chart Patterns", "engine": "chartpat", "build": True,
+    "asset_classes": ["stocks", "crypto"], "cadence": "intraday",
+    "horizon": "hours–days", "color": "#38d9f8",
+    "edge": "Deterministic chart intelligence: confirmed-pivot S/R zones, "
+            "trendlines, double tops/bottoms, compression — trades only "
+            "volume-confirmed breaks",
+    "universe": "liquid stocks/ETFs + crypto",
+}
+
 # ── experimental models (Claude-designed; clearly labeled; same rules) ──
 MODELS.update({
     "exp_liquidity_vacuum": {
