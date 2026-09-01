@@ -26,7 +26,7 @@ SPREAD_EST_TABLE = [  # (tier_hi, est_spread_pct) conservative historical estima
 
 
 def est_spread_pct(price: float, pm_dollar_vol: float) -> float:
-    base = next(s for hi, s in SPREAD_EST_TABLE if price < hi)
+    base = next((s for hi, s in SPREAD_EST_TABLE if price < hi), 1.0)
     if pm_dollar_vol < 100_000:
         base *= 1.6
     elif pm_dollar_vol > 1_000_000:
