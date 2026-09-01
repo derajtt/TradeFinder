@@ -77,7 +77,7 @@ export default function Dashboard() {
         </div>
         <div className="card">
           <h3>Scanner Hit Rate</h3>
-          <div className="big" title="WIN = reached +10% after the 7:00 broker window · LOSS = finished below found price · else neutral">
+          <div className="big" title="WIN = popped up within the first minutes of tradability (locked forever) · LOSS = dropped instead · judged only on the early window, never hours later">
             {status?.outcomes?.win_rate != null ? `${(status.outcomes.win_rate * 100).toFixed(0)}%` : '—'}
           </div>
           <div className="sub">

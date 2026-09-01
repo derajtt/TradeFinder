@@ -25,12 +25,12 @@ export default function PerformancePage() {
       {perf.outcomes && (
         <>
           <div className="sect"><h2 style={{ fontSize: 13 }}>Scanner scoreboard</h2>
-            <span className="meta">WIN = +10% reached after the 7:00 window · LOSS = finished red · includes WATCH picks</span></div>
+            <span className="meta">judged on the first minutes after each pick becomes tradable — a pop = WIN forever, a drop = LOSS; never re-judged later</span></div>
           <div className="cards" style={{ marginTop: 4 }}>
             <div className="card"><h3>Win rate</h3>
               <div className="big pos">{perf.outcomes.win_rate != null ? (perf.outcomes.win_rate * 100).toFixed(0) + '%' : '—'}</div>
               <div className="sub">{perf.outcomes.win + perf.outcomes.loss} decided</div></div>
-            <div className="card"><h3>Wins ≥ +10%</h3><div className="big pos">{perf.outcomes.win}</div></div>
+            <div className="card"><h3>Early-window pops</h3><div className="big pos">{perf.outcomes.win}</div></div>
             <div className="card"><h3>Neutral</h3><div className="big dim">{perf.outcomes.neutral}</div></div>
             <div className="card"><h3>Losses</h3><div className="big neg">{perf.outcomes.loss}</div>
               <div className="sub">{perf.outcomes.pending} still pending</div></div>

@@ -23,6 +23,7 @@ export const TERMS: Record<string, string> = {
   since_hilo: 'Highest and lowest prices observed since the signal fired.',
   max_gain: 'Best-case: highest % above the signal price reached since it fired.',
   max_dd: 'Worst-case: lowest % below the signal price reached since it fired.',
+  outcome: 'Judged ONLY on the first minutes after the pick becomes tradable (7:00 window or signal time): up ≥ threshold inside it = WIN locked forever; down ≥ threshold without the pop = LOSS; neither = NEUTRAL. Never re-judged hours later.',
   signal_type: 'BUY = every gate passed. WATCH = notable pick (score ≥ threshold, real volume, fresh price) recorded and tracked identically, but not fully qualified.',
   checkpoints: 'Snapshots taken 5/15/30/60 minutes after the signal and at the close.',
 };

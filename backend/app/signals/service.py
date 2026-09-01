@@ -128,23 +128,52 @@ async def record_close_checkpoint(session: AsyncSession, sig: BuySignal,
     await session.flush()
 
 
-def classify_outcome(sig: BuySignal) -> str:
-    """User rule: >= +10% reached after the 7:00 window = win; final change
-    negative = loss; otherwise neutral. 'pending' until post-window data exists."""
+def outcome_window(sig: BuySignal, settings: Dict[str, Any]):
+    """The judgment window: starts when the pick becomes tradable (broker
+    premarket open, or signal time if later) and lasts early_window_min minutes.
+    Returns (start_utc, end_utc)."""
+    from datetime import date as _date
+    from datetime import datetime as _dt
+
+    from ..util.timeutil import ET
+    start = sig.initiated_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    confirm = str(settings.get("buy_confirm_after_et") or "").strip()
+    if confirm:
+        try:
+            hh, mm = (int(x) for x in confirm.split(":"))
+            d = _date.fromisoformat(sig.session_date)
+            open_utc = _dt(d.year, d.month, d.day, hh, mm, tzinfo=ET).astimezone(timezone.utc)
+            if open_utc > start:
+                start = open_utc
+        except (ValueError, TypeError):
+            pass
+    minutes = int(settings.get("early_window_min") or 30)
+    return start, start + timedelta(minutes=minutes)
+
+
+def classify_outcome(sig: BuySignal, thr_pct: float = 2.0,
+                     window_closed: bool = False) -> str:
+    """User rule: judged ONLY on the early tradability window. Up >= thr inside
+    it = WIN (locked forever); down >= thr without the up-move first = LOSS;
+    window over without either = NEUTRAL. Never re-judged hours later."""
     p0 = sig.buy_signal_price
     if not p0:
         return "pending"
-    if sig.post_window_high is not None and sig.post_window_high >= p0 * 1.10:
+    wh, wl = sig.post_window_high, sig.post_window_low
+    if wh is None and wl is None:
+        return "pending"           # window not reached / no data collected yet
+    thr = max(0.0, float(thr_pct)) / 100.0
+    if wh is not None and wh >= p0 * (1 + thr) and (thr > 0 or wh > p0):
         return "win"
-    if sig.post_window_high is None and sig.post_window_low is None:
-        return "pending"
-    cur = sig.current_live_price
-    if cur is not None and cur < p0:
+    if wl is not None and wl <= p0 * (1 - thr) and (thr > 0 or wl < p0):
         return "loss"
-    return "neutral"
+    return "neutral" if window_closed else "pending"
 
 
 def update_post_window(sig: BuySignal, price: float) -> None:
+    """Record extremes for the early judgment window only (caller checks time)."""
     if price and price > 0:
         sig.post_window_high = max(sig.post_window_high or price, price)
         sig.post_window_low = min(sig.post_window_low or price, price)
@@ -165,5 +194,15 @@ def signal_metrics(sig: BuySignal) -> Dict[str, Any]:
         out["max_drawdown_pct"] = round((sig.since_signal_low - p0) / p0 * 100.0, 3)
     out["post7_high"] = sig.post_window_high
     out["post7_low"] = sig.post_window_low
-    out["outcome"] = classify_outcome(sig)
+    return out
+
+
+def metrics_with_outcome(sig: BuySignal, settings: Dict[str, Any]) -> Dict[str, Any]:
+    from ..util.timeutil import now_utc as _now
+    out = signal_metrics(sig)
+    _, end = outcome_window(sig, settings)
+    out["outcome"] = classify_outcome(
+        sig, thr_pct=float(settings.get("early_win_gain_pct") or 2.0),
+        window_closed=_now() > end)
+    out["window_end"] = end.isoformat()
     return out

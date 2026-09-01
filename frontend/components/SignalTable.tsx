@@ -28,7 +28,7 @@ export default function SignalTable({ rows, onSelect, compact }: {
           <th title={TERMS.since_hilo}>Since Hi/Lo</th>
           <th title={TERMS.max_gain}>Max Gain</th>
           <th title={TERMS.max_dd}>Max DD</th>
-          <th className="l" title="WIN = reached +10% after the 7:00 broker window · LOSS = finished below found price · NEUTRAL = in between · PENDING = window not reached yet">Result</th>
+          <th className="l" title={TERMS.outcome}>Result</th>
           {!compact && <th className="l">Catalyst</th>}
           <th className="l">Initiated</th><th className="l">Status</th>
         </tr></thead>

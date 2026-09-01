@@ -103,18 +103,37 @@ async def test_watch_signal_type_recorded(db):
     assert buy is not None and buy.signal_type == "buy"
 
 
-async def test_outcome_classification(db):
+async def test_outcome_early_window_rule(db):
+    """WIN = up >= thr within the early window, locked forever; judged never later."""
     from app.signals.service import classify_outcome, update_post_window
     sig = await make(db)                      # found @ 2.50
-    assert classify_outcome(sig) == "pending"
-    update_post_window(sig, 2.60)             # +4% after window
-    await svc.update_tracking(db, sig, price=2.60, provider_ts=None)
-    assert classify_outcome(sig) == "neutral"
-    update_post_window(sig, 2.80)             # +12% peak after window
-    assert classify_outcome(sig) == "win"     # win even if it fades later
+    assert classify_outcome(sig, thr_pct=2.0) == "pending"
+    update_post_window(sig, 2.52)             # +0.8% — inside noise band
+    assert classify_outcome(sig, thr_pct=2.0, window_closed=False) == "pending"
+    assert classify_outcome(sig, thr_pct=2.0, window_closed=True) == "neutral"
+    update_post_window(sig, 2.56)             # +2.4% inside window -> WIN
+    assert classify_outcome(sig, thr_pct=2.0) == "win"
+    update_post_window(sig, 2.10)             # later crash changes NOTHING
+    assert classify_outcome(sig, thr_pct=2.0, window_closed=True) == "win"
+
     sig2 = await make(db, evidence_snapshot={"catalyst": {"catalyst_type": "x",
                                                           "content_hash": "z2",
                                                           "source_url": "u"}})
-    update_post_window(sig2, 2.45)
-    await svc.update_tracking(db, sig2, price=2.30, provider_ts=None)
-    assert classify_outcome(sig2) == "loss"   # finished below found price
+    update_post_window(sig2, 2.42)            # -3.2% without an up-move first
+    assert classify_outcome(sig2, thr_pct=2.0) == "loss"
+
+
+async def test_outcome_window_bounds(db):
+    from datetime import timedelta, timezone as _tz
+    from app.signals.service import outcome_window
+    sig = await make(db, evidence_snapshot={"catalyst": {"catalyst_type": "y",
+                                                         "content_hash": "z3",
+                                                         "source_url": "u"}})
+    s = {"buy_confirm_after_et": "", "early_window_min": 30}
+    start, end = outcome_window(sig, s)
+    assert (end - start) == timedelta(minutes=30)
+    assert abs((start - sig.initiated_at.replace(tzinfo=start.tzinfo)).total_seconds()) < 2
+    # broker window later than initiation pushes the start forward
+    s2 = {"buy_confirm_after_et": "23:59", "early_window_min": 10}
+    start2, end2 = outcome_window(sig, s2)
+    assert start2 > start and (end2 - start2) == timedelta(minutes=10)

@@ -20,7 +20,8 @@ from ..models import (AiUsage, BuySignal, Candidate, CandidateFeatureSnapshot,
                       SymbolReferenceVersion)
 from ..scoring.engine import DEFAULT_SETTINGS, STRATEGY_VERSION
 from ..settings_service import get_settings, update_settings
-from ..signals.service import classify_outcome, signal_metrics
+from ..signals.service import metrics_with_outcome, signal_metrics
+from ..settings_service import get_settings as _get_settings
 from ..sse import broadcaster
 from ..util.timeutil import next_scan_start, now_et, session_phase
 
@@ -54,9 +55,10 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
                                       BuySignal.is_demo == False))).scalar() or 0  # noqa: E712
     real = (await db.execute(select(BuySignal).where(
         BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+    _settings = await _get_settings(db)
     oc = {"win": 0, "neutral": 0, "loss": 0, "pending": 0}
     for s_ in real:
-        oc[classify_outcome(s_)] += 1
+        oc[metrics_with_outcome(s_, _settings)["outcome"]] += 1
     dec = oc["win"] + oc["loss"]
     return {
         "et_time": t.isoformat(), "phase": session_phase(),
@@ -200,6 +202,7 @@ async def signals(active_only: bool = False, include_demo: bool = False,
     if not include_demo:
         q = q.where(BuySignal.is_demo == False)  # noqa: E712
     rows = (await db.execute(q)).scalars().all()
+    _settings = await _get_settings(db)
     out = []
     for s in rows:
         cps = (await db.execute(select(SignalPriceCheckpoint)
@@ -218,7 +221,7 @@ async def signals(active_only: bool = False, include_demo: bool = False,
             "score": (s.score_snapshot or {}).get("score"),
             "catalyst_type": ((s.evidence_snapshot or {}).get("catalyst") or {}).get("catalyst_type", ""),
             "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
-            **signal_metrics(s),
+            **metrics_with_outcome(s, _settings),
         })
     return {"rows": out}
 
@@ -268,7 +271,7 @@ async def signal_detail(signal_uid: str, db: AsyncSession = Depends(get_session)
         "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
         "events": [{"ts": e.ts_utc.isoformat(), "type": e.event_type, "detail": e.detail}
                    for e in events],
-        **signal_metrics(s),
+        **metrics_with_outcome(s, await _get_settings(db)),
     }
 
 
@@ -322,8 +325,9 @@ async def performance(db: AsyncSession = Depends(get_session)):
         BuySignal.is_demo == False))).scalars().all()  # noqa: E712
     outcomes = {"win": 0, "neutral": 0, "loss": 0, "pending": 0}
     by_type: Dict[str, Dict[str, int]] = {}
+    _settings = await _get_settings(db)
     for s in all_real:
-        o = classify_outcome(s)
+        o = metrics_with_outcome(s, _settings)["outcome"]
         outcomes[o] += 1
         t = getattr(s, "signal_type", "buy")
         by_type.setdefault(t, {"win": 0, "neutral": 0, "loss": 0, "pending": 0})[o] += 1

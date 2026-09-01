@@ -46,6 +46,8 @@ const GROUPS: { title: string; hint?: string; fields: [keyof AppSettings, string
       ['max_extension_from_pm_high_pct', 'Max extension from PM high %'],
       ['est_rvol_buy_multiplier', 'Estimated-RVOL multiplier'],
       ['reentry_cooldown_min', 'Re-entry cooldown (min)'],
+      ['early_window_min', 'Outcome window (min)', 'A pick is judged only on its first N minutes of tradability (10–30 typical).'],
+      ['early_win_gain_pct', 'Win threshold (%)', 'Up this much inside the window = WIN, locked forever. 0 = any uptick counts.'],
     ],
   },
   {
