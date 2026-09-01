@@ -15,7 +15,8 @@ ANALYSIS_SCHEMA: Dict[str, Any] = {
     "additionalProperties": False,
     "properties": {
         "direction": {"type": "string", "enum": ["positive", "negative", "mixed", "neutral"]},
-        "materiality": {"type": "integer", "minimum": 0, "maximum": 100},
+        "materiality": {"type": "integer", "minimum": 0, "maximum": 100,
+                        "description": "0-100 scale: 0-10 routine, 20-40 modest, 50-70 market-moving for a microcap, 80-100 transformative"},
         "novelty": {"type": "string", "enum": ["new", "update", "recycled", "unrelated"]},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "catalyst_type": {"type": "string"},
@@ -42,9 +43,19 @@ ANALYSIS_SCHEMA: Dict[str, Any] = {
 SYSTEM_PROMPT = (
     "You are a disciplined equity-catalyst analyst. Classify only what the provided "
     "evidence supports. Never invent prices, volumes, timestamps, filing types, or "
-    "numbers not present in the evidence. Routine or recycled items are NOT material. "
-    "Flag dilution (offerings, ATMs, shelfs, warrants, convertibles) and going-concern "
-    "language whenever present. Keep the summary under 80 words, plain English."
+    "numbers not present in the evidence.\n"
+    "SCALES (follow exactly):\n"
+    "- materiality: integer 0-100 on a percentage-like scale. 0-10 = routine/noise "
+    "(scheduled filings, minor PR). 20-40 = modest (small contract, minor analyst note). "
+    "50-70 = clearly market-moving for a microcap (meaningful contract/order, positive "
+    "trial update, strategic partnership). 80-100 = transformative (FDA approval, "
+    "acquisition, massive contract vs company size).\n"
+    "- confidence: 0.0-1.0 that your classification is correct from this evidence.\n"
+    "- novelty: new = first report within the last day; update = new development in a "
+    "known story; recycled = re-publication of old news; unrelated = not about this company.\n"
+    "Routine or recycled items are NOT material. Flag dilution (offerings, ATMs, "
+    "shelfs, warrants, convertibles) and going-concern language whenever present. "
+    "Keep the summary under 80 words, plain English."
 )
 
 

@@ -107,7 +107,8 @@ async def analyze_catalyst(ctx: ScanContext, db: AsyncSession, symbol: str,
         return None
     basis = _content_hash(symbol,
                           "|".join(sorted(i["content_hash"] for i in news_items)),
-                          "|".join(sorted(f.get("accession", "") for f in filings)))
+                          "|".join(sorted(f.get("accession", "") for f in filings)),
+                          "analyzer-v2")  # bumped when the analysis contract changes
     cached = (await db.execute(select(Catalyst).where(Catalyst.content_hash == basis))
               ).scalar_one_or_none()
     if cached and cached.status == "ok":
