@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useRef, useState } from 'react';
 import CandidateTable from '../components/CandidateTable';
+import RadarTable, { type RadarRow } from '../components/RadarTable';
 import DetailDrawer from '../components/DetailDrawer';
 import SignalTable from '../components/SignalTable';
 import { useEventStream, usePolling } from '../lib/api';
@@ -8,10 +9,11 @@ import { fmtPct, fmtPrice } from '../lib/format';
 import type { CandidateRow, SignalRow, StatusPayload } from '../lib/types';
 
 export default function Dashboard() {
-  const [candResp] = usePolling<{ rows: CandidateRow[] }>('/api/candidates', 30000);
+  const [candResp] = usePolling<{ rows: CandidateRow[]; radar?: RadarRow[] }>('/api/candidates', 30000);
   const [sigResp, , reloadSigs] = usePolling<{ rows: SignalRow[] }>('/api/signals?active_only=true', 30000);
   const [status] = usePolling<StatusPayload>('/api/status', 20000);
   const [liveRows, setLiveRows] = useState<CandidateRow[] | null>(null);
+  const [liveRadar, setLiveRadar] = useState<RadarRow[] | null>(null);
   const [liveSigs, setLiveSigs] = useState<Record<string, Partial<SignalRow>>>({});
   const [updated, setUpdated] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
@@ -20,6 +22,7 @@ export default function Dashboard() {
   useEventStream({
     candidates: (d) => {
       setLiveRows(d.rows ?? []);
+      if (d.radar) setLiveRadar(d.radar);
       const syms = new Set<string>((d.rows ?? []).map((r: CandidateRow) => r.symbol));
       setUpdated(syms);
       if (clearRef.current) clearTimeout(clearRef.current);
@@ -36,6 +39,7 @@ export default function Dashboard() {
   });
 
   const rows = liveRows ?? candResp?.rows ?? [];
+  const radar = liveRadar ?? candResp?.radar ?? [];
   const sigRows = (sigResp?.rows ?? []).map((s) => {
     const u = liveSigs[s.signal_uid] as any;
     return u ? { ...s, current: u.current ?? s.current,
@@ -90,6 +94,8 @@ export default function Dashboard() {
         <span className="spacer" />
       </div>
       <CandidateTable rows={rows} updatedSyms={updated} onSelect={onSelect} />
+
+      <RadarTable rows={radar} onSelect={onSelect} />
 
       <p className="disclaimer">
         BUY is a rules-based research signal produced by the documented scoring engine
