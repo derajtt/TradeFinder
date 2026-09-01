@@ -54,7 +54,8 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
                                       BuySignal.signal_type == "buy",
                                       BuySignal.is_demo == False))).scalar() or 0  # noqa: E712
     real = (await db.execute(select(BuySignal).where(
-        BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+        BuySignal.is_demo == False,  # noqa: E712
+        BuySignal.status != "invalidated"))).scalars().all()
     _settings = await _get_settings(db)
     oc = {"win": 0, "neutral": 0, "loss": 0, "pending": 0}
     for s_ in real:
@@ -322,7 +323,8 @@ async def performance(db: AsyncSession = Depends(get_session)):
     # win/loss scoreboard (user rule): +10% reached after the broker window = win,
     # finished below found price = loss, else neutral; pending until data exists
     all_real = (await db.execute(select(BuySignal).where(
-        BuySignal.is_demo == False))).scalars().all()  # noqa: E712
+        BuySignal.is_demo == False,  # noqa: E712
+        BuySignal.status != "invalidated"))).scalars().all()
     outcomes = {"win": 0, "neutral": 0, "loss": 0, "pending": 0}
     by_type: Dict[str, Dict[str, int]] = {}
     _settings = await _get_settings(db)

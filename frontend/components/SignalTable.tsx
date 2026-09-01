@@ -1,5 +1,6 @@
 'use client';
 import { fmtEtDate, fmtPct, fmtPrice } from '../lib/format';
+import Freshness from './Freshness';
 import type { SignalRow } from '../lib/types';
 import { TERMS } from '../lib/terms';
 import Score from './Score';
@@ -37,6 +38,8 @@ export default function SignalTable({ rows, onSelect, compact }: {
             const chg = s.change_pct;
             return (
               <tr key={s.signal_uid} onClick={() => onSelect(s)} tabIndex={0} role="button"
+                  style={s.status === 'invalidated' ? { opacity: 0.38 } : undefined}
+                  title={s.status === 'invalidated' ? 'Invalidated (duplicate) — prices frozen, excluded from the scoreboard' : undefined}
                   onKeyDown={(e) => e.key === 'Enter' && onSelect(s)}>
                 <td className="l"><span className="sym">{s.symbol}</span>
                   <span className={`badge ${s.signal_type === 'watch' ? 'early' : 'buy'}`}
@@ -45,7 +48,7 @@ export default function SignalTable({ rows, onSelect, compact }: {
                   {s.is_demo && <span className="badge warn" style={{ marginLeft: 6 }}>DEMO</span>}</td>
                 <td><Score v={s.score} /></td>
                 <td title={`Immutable initiation price · ${s.price_source}`}><b>{fmtPrice(s.buy_price)}</b></td>
-                <td>{fmtPrice(s.current)}</td>
+                <td>{fmtPrice(s.current)} <Freshness ts={s.current_ts} /></td>
                 <td className={chg == null ? '' : chg >= 0 ? 'pos' : 'neg'}>{fmtPct(chg)}</td>
                 <td className="dim">{fmtPrice(s.day_high)} / {fmtPrice(s.day_low)}</td>
                 <td className="dim">{fmtPrice(s.since_high)} / {fmtPrice(s.since_low)}</td>
