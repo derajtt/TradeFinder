@@ -146,7 +146,26 @@ tests + production build. CI uses mocks; no live keys.
 - Before every push, run the secret-leak gate (also enforced in CI):
   `git grep -nIE 'sk-[A-Za-z0-9_-]{20,}|apikey=[A-Za-z0-9]{16,}|BEGIN .*PRIVATE KEY' -- . ':!*.lock'`
 
-## DigitalOcean
+## DigitalOcean (deployed)
+
+**Current production layout (since 2026-09-01):** backend + PostgreSQL run on the
+droplet at `104.248.127.54` (`/opt/premarket`, docker compose services `db` + `api`,
+sharing the server with SwoopSeo on port 8787 — untouched). The API requires
+`X-API-Key` (`API_ACCESS_KEY` in the droplet's `/opt/premarket/.env`; a copy for the
+frontend sits in `/root/premarket_frontend_key.txt`). The local frontend
+(`launchd`, http://localhost:3002) points at it via `frontend/.env.local`
+(`NEXT_PUBLIC_API_BASE` + `NEXT_PUBLIC_API_KEY`). A 2G swapfile was added to protect
+the 2GB droplet from memory pressure.
+
+Update the droplet after pushing to GitHub:
+
+```bash
+ssh root@104.248.127.54 'cd /opt/premarket && git pull && docker compose up -d --build api'
+```
+
+Switch the dashboard back to a local backend anytime:
+`launchctl load ~/Library/LaunchAgents/com.premarkethunter.backend.plist`, set
+`frontend/.env.local` back to `http://localhost:8000` (no key), rebuild, restart.
 
 See `deploy/digitalocean.md` (droplet setup, firewall, split frontend/backend) and
 `deploy/deploy_digitalocean.sh` (one-command rsync + compose deploy). The supplied
