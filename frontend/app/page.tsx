@@ -5,6 +5,7 @@ import RadarTable, { type RadarRow } from '../components/RadarTable';
 import SessionStrip from '../components/SessionStrip';
 import FunnelStrip from '../components/FunnelStrip';
 import NoonCard from '../components/NoonCard';
+import OpsPanel from '../components/OpsPanel';
 import ProfileTabs from '../components/ProfileTabs';
 import PositionsTable from '../components/PositionsTable';
 import RejectedTable from '../components/RejectedTable';
@@ -66,6 +67,7 @@ export default function Dashboard() {
   return (
     <>
       <SessionStrip confirmAt="07:00" />
+      <OpsPanel />
       <ProfileTabs />
       <FunnelStrip profile={profile} />
       <div className="cards">

@@ -704,3 +704,79 @@ async def noon_outcomes(db: AsyncSession = Depends(get_session)):
                     "WIN even if price later fades. Call accuracy ≠ captured "
                     "profit.",
             "rows": out[:60]}
+
+
+@router.get("/ops")
+async def ops(request: Request, db: AsyncSession = Depends(get_session)):
+    """One-glance operations view: every lane's live state + what happens next."""
+    from ..strategy.registry import MODELS
+    from ..util.timeutil import ET, is_trading_day, next_scan_start, now_et
+    from datetime import datetime as _dt, timedelta as _td
+    shared = app_state(request)
+    sched = shared.get("scheduler")
+    t = now_et()
+    mins = t.hour * 60 + t.minute
+    phase = session_phase()
+    s = await _get_settings(db)
+
+    def nxt(hh, mm, label):
+        target = t.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        d = t.date()
+        while target <= t or not is_trading_day(d):
+            d = d + _td(days=1)
+            if is_trading_day(d):
+                target = _dt(d.year, d.month, d.day, hh, mm, tzinfo=ET)
+                break
+            target = _dt(d.year, d.month, d.day, hh, mm, tzinfo=ET)
+        return {"event": label, "at_et": target.isoformat()}
+
+    lanes = [
+        {"lane": "Premarket Scalper discovery", "state":
+            "RUNNING" if phase in ("prep", "premarket") else "SCHEDULED",
+         "detail": "scanning movers+news+sweep across the microcap universe"
+                   if phase in ("prep", "premarket") else
+                   "arms at 4:00 AM ET on trading days"},
+        {"lane": "Actionable BUY window", "state":
+            "OPEN" if phase == "premarket" and 420 <= mins <= 560 else "CLOSED",
+         "detail": "7:00–9:20 AM ET — EARLY WATCH before, EXPIRED after"},
+        {"lane": "Model fleet (stocks)", "state":
+            "RUNNING" if phase == "regular" else
+            ("DAILY MODELS ONLY" if phase == "afterhours" else "SCHEDULED"),
+         "detail": f"{sum(1 for m in MODELS.values() if m.get('build'))} models; "
+                   f"intraday engines run 9:30–16:00, daily engines after close"},
+        {"lane": "Crypto lane", "state": "RUNNING 24/7",
+         "detail": "crypto-eligible models on BTC/ETH/SOL/XRP/DOGE/ADA"},
+        {"lane": "Position tracking & exits", "state":
+            "RUNNING" if phase != "closed" else "IDLE (no session)",
+         "detail": "stops, targets, shadow exits, MFE/MAE every cycle"},
+        {"lane": "Noon outcome finalizer", "state":
+            "DONE TODAY" if mins >= 725 and phase != "closed" else "SCHEDULED",
+         "detail": "locks PREMARKET_SCALPER_OUTCOME_V1 at 12:00 ET"},
+        {"lane": "Nightly research", "state":
+            "RUNNING" if phase == "afterhours" and mins >= 1215 else "SCHEDULED",
+         "detail": "after 20:15 ET: replay today, update challengers, "
+                   "promotion audit (hold until 100 forward trades)"},
+        {"lane": "Regime controller", "state":
+            (getattr(sched, "last_regime", {}) or {}).get("state", "n/a").upper(),
+         "detail": (getattr(sched, "last_regime", {}) or {}).get("why", "")},
+    ]
+    upcoming = sorted([
+        nxt(4, 0, "Premarket discovery begins"),
+        nxt(7, 0, "Broker window opens — EARLY WATCH can convert to BUY"),
+        nxt(9, 20, "Last new premarket entry"),
+        nxt(9, 30, "Regular session — intraday models activate"),
+        nxt(12, 0, "Noon outcomes lock"),
+        nxt(15, 55, "Intraday paper positions time-exit"),
+        nxt(20, 15, "Nightly research replay"),
+    ], key=lambda x: x["at_et"])[:5]
+    return {"now_et": t.isoformat(), "phase": phase, "lanes": lanes,
+            "upcoming": upcoming,
+            "not_running": [
+                {"what": "Local Mac backend", "why": "droplet owns scanning "
+                 "(avoids double API spend); launchd plist kept for fallback"},
+                {"what": "Optimized strategy promotion", "why":
+                 "research refused honestly (n too small); gate needs 100 "
+                 "forward paper trades"},
+                {"what": "Research-only methods", "why":
+                 "HFT/order-flow/short-vol need data feeds this plan lacks"},
+            ]}
