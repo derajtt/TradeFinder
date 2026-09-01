@@ -66,15 +66,28 @@ def detect(bars: List[dict]) -> Dict[str, Any]:
     if dn and dn["slope"] < 0:
         out["trendlines"].append({**dn, "kind": "downtrend_resistance"})
 
-    # double top / bottom: two pivots within 0.8%, separated by 5+ bars
+    # double top / bottom: two pivots within 0.8%, separated by 5+ bars.
+    # Full geometry included so the UI can draw the actual M / W shape.
     for pts, kind in ((hs, "double_top"), (ls, "double_bottom")):
         if len(pts) >= 2:
             (i1, p1), (i2, p2) = pts[-2], pts[-1]
             if i2 - i1 >= 5 and abs(p1 - p2) / p1 * 100 <= 0.8:
+                between = bars[i1:i2 + 1]
+                if kind == "double_top":
+                    neck = min(b["l"] for b in between)
+                    neck_i = i1 + min(range(len(between)),
+                                      key=lambda j: between[j]["l"])
+                else:
+                    neck = max(b["h"] for b in between)
+                    neck_i = i1 + max(range(len(between)),
+                                      key=lambda j: between[j]["h"])
                 out["patterns"].append({"type": kind, "i1": i1, "i2": i2,
+                                        "p1": round(p1, 4), "p2": round(p2, 4),
+                                        "neck": round(neck, 4), "neck_i": neck_i,
                                         "level": round((p1 + p2) / 2, 4),
                                         "note": f"two pivots within 0.8% "
-                                                f"({i2 - i1} bars apart)"})
+                                                f"({i2 - i1} bars apart); "
+                                                f"neckline {round(neck, 4)}"})
 
     # compression: recent range under 45% of prior range (volatility contraction)
     if len(bars) >= 30:

@@ -200,17 +200,76 @@ export default function ChartPane({ paneId, defaultSymbol }: {
           s.setData([{ time: t.t1, value: t.p1 }, { time: t.t2, value: t.p2 }] as any);
         }
       }
+      const allMarks: any[] = [];
+      if (auto.pat) {
+        // draw the actual pattern geometry
+        const seg = (pts: { time: any; value: number }[], color: string,
+                     width = 2, style = 0) => {
+          const s = chart.addLineSeries({ color, lineWidth: width as any,
+            lineStyle: style as any, priceLineVisible: false,
+            lastValueVisible: false, crosshairMarkerVisible: false });
+          s.setData(pts as any);
+        };
+        for (const pat of det.patterns ?? []) {
+          if (pat.type === 'double_top' && pat.t1 != null && pat.neck_t != null) {
+            // the M: peak -> valley -> peak
+            seg([{ time: pat.t1, value: pat.p1 },
+                 { time: pat.neck_t, value: pat.neck },
+                 { time: pat.t2, value: pat.p2 }], 'rgba(251,191,36,0.9)');
+            // dashed neckline projected to the latest bar
+            seg([{ time: pat.t1, value: pat.neck },
+                 { time: pat.t_end ?? pat.t2, value: pat.neck }],
+                'rgba(251,191,36,0.5)', 1, 2);
+            allMarks.push({ time: pat.t2, position: 'aboveBar',
+              color: '#fbbf24', shape: 'circle',
+              text: simple ? 'M pattern' : 'double top' });
+          }
+          if (pat.type === 'double_bottom' && pat.t1 != null && pat.neck_t != null) {
+            // the W: trough -> peak -> trough
+            seg([{ time: pat.t1, value: pat.p1 },
+                 { time: pat.neck_t, value: pat.neck },
+                 { time: pat.t2, value: pat.p2 }], 'rgba(103,232,249,0.9)');
+            seg([{ time: pat.t1, value: pat.neck },
+                 { time: pat.t_end ?? pat.t2, value: pat.neck }],
+                'rgba(103,232,249,0.5)', 1, 2);
+            allMarks.push({ time: pat.t2, position: 'belowBar',
+              color: '#67e8f9', shape: 'circle',
+              text: simple ? 'W pattern' : 'double bottom' });
+          }
+          if (pat.type === 'compression' && pat.t1 != null && pat.t2 != null) {
+            // coil boundaries (top + bottom of the contracting range)
+            seg([{ time: pat.t1, value: pat.hi }, { time: pat.t2, value: pat.hi }],
+                'rgba(167,139,250,0.7)', 1, 3);
+            seg([{ time: pat.t1, value: pat.lo }, { time: pat.t2, value: pat.lo }],
+                'rgba(167,139,250,0.7)', 1, 3);
+            allMarks.push({ time: pat.t2, position: 'inBar',
+              color: '#a78bfa', shape: 'square',
+              text: simple ? 'coil' : 'compression' });
+          }
+        }
+      }
       if (auto.sig) {
         const sigs = simple ? (det.signals ?? []).slice(-6) : det.signals ?? [];
-        const sigMarks = sigs.filter((s: any) => s.time != null)
-          .map((s: any) => ({ time: s.time,
+        for (const s of sigs.filter((s: any) => s.time != null)) {
+          allMarks.push({ time: s.time,
             position: s.kind.startsWith('buy') ? 'belowBar' : 'aboveBar',
             color: s.kind.startsWith('buy') ? '#34d399' : '#f87171',
             shape: s.kind.startsWith('buy') ? 'arrowUp' : 'arrowDown',
             text: simple ? (s.kind.startsWith('buy') ? 'BUY' : 'SELL')
-                         : s.kind.replace(/_/g, ' ') }));
-        if (sigMarks.length) candles.setMarkers(sigMarks.sort((a: any, b: any) =>
-          (a.time as number) > (b.time as number) ? 1 : -1));
+                         : s.kind.replace(/_/g, ' ') });
+        }
+      }
+      if (allMarks.length) {
+        const seen = new Set<string>();
+        const uniq = allMarks
+          .sort((a: any, b: any) => ((a.time as number) > (b.time as number) ? 1 : -1))
+          .filter((m: any) => {
+            const k = `${m.time}|${m.text}`;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+        candles.setMarkers(uniq as any);
       }
     }
     // saved drawings

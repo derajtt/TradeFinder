@@ -1076,6 +1076,9 @@ async def chart_analyze(symbol: str, tf: str = "5min", request: Request = None,
     for pat in det["patterns"]:
         pat["t1"] = bars[pat["i1"]]["time"] if 0 <= pat["i1"] < len(bars) else None
         pat["t2"] = bars[pat["i2"]]["time"] if 0 <= pat["i2"] < len(bars) else None
+        if pat.get("neck_i") is not None and 0 <= pat["neck_i"] < len(bars):
+            pat["neck_t"] = bars[pat["neck_i"]]["time"]
+        pat["t_end"] = bars[-1]["time"] if bars else None
     return {"symbol": symbol.upper(), "tf": tf, "quality": bars_resp["quality"],
             **det,
             "note": "confirmed-pivot detection — signals use only data available "
