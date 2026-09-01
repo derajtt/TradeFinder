@@ -76,7 +76,7 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
 
         {d && (<>
           <div className="kv-grid">
-            <KV k="Price" v={fmtPrice(feats.price)} />
+            <KV k={feats.price_indicative ? 'Price (indicative mid)' : 'Price'} v={(feats.price_indicative ? '~' : '') + fmtPrice(feats.price)} />
             <KV k="Gap %" v={fmtPct(feats.gap_pct)} cls={(feats.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'} />
             <KV k={`RVOL${feats.rvol_estimated ? ' (est)' : ''}`} v={feats.rvol != null ? fmtNum(feats.rvol, 1) + 'x' : '—'} />
             <KV k="PM Volume" v={fmtCompact(feats.pm_volume)} />

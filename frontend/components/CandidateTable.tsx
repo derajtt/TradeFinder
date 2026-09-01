@@ -89,7 +89,8 @@ export default function CandidateTable({ rows, updatedSyms, onSelect }: {
                   <div className="co-name">{r.name}</div>
                 </td>
                 <td><Score v={r.score} /></td>
-                <td>{fmtPrice(r.price)} <Freshness ts={r.provider_ts} fresh={r.quote_fresh} /></td>
+                <td title={r.price_indicative ? 'Indicative bid/ask mid — no fresh trade print yet; BUY stays blocked until one prints' : undefined}>
+                  {r.price_indicative ? '~' : ''}{fmtPrice(r.price)} <Freshness ts={r.provider_ts} fresh={r.quote_fresh || r.price_indicative} /></td>
                 <td className={(r.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'}>{fmtPct(r.gap_pct)}</td>
                 <td>{r.rvol != null ? <>{fmtNum(r.rvol, 1)}x {r.rvol_estimated && <span className="badge est" title="Estimated vs avg daily volume curve — baseline history still accumulating">EST</span>}</> : <span className="faint" title="Baseline coverage insufficient">—</span>}</td>
                 <td>{fmtCompact(r.pm_volume)}</td>

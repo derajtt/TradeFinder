@@ -57,16 +57,22 @@ class Accumulator:
         db.add(LiveQuote(symbol=symbol, provider_ts=provider_ts, price=price,
                          volume=volume, source="fmp_quote"))
         prev = self.last_obs.get(symbol)
-        self.last_obs[symbol] = (ts, volume if volume is not None else 0.0, price)
-        if prev is None or volume is None:
+        self.last_obs[symbol] = (ts, volume, price)
+        if prev is None:
             return
         prev_ts, prev_vol, prev_price = prev
         if prev_ts.date() != ts.date():
             return  # session boundary; no delta across days
         gap_min = (ts - prev_ts).total_seconds() / 60.0
-        if gap_min <= 0 or gap_min > 10:
-            return  # stale/duplicate/clock-skew observation
-        if volume >= prev_vol:
+        if gap_min > 10:
+            return  # stale/clock-skew observation
+        if gap_min <= 0:
+            if prev_price == price and (volume is None or volume == prev_vol):
+                return  # book genuinely unchanged
+            ts = now_utc().astimezone(ET)  # provider ts frozen but data moved
+        if volume is None or prev_vol is None:
+            dvol = 0.0  # volume unreported this interval: price-only bar, never fabricated
+        elif volume >= prev_vol:
             dvol = volume - prev_vol
         else:
             dvol = volume  # provider counter reset (e.g., new session)

@@ -283,20 +283,32 @@ def compute_market_features(quote: dict, today_pm: List[dict], baselines: List[f
     vw = F.vwap(today_pm)
     struct = F.structure_features(today_pm)
     price = quote.get("price")
+    price_indicative = False
     spread = F.spread_pct((amq or {}).get("bid"), (amq or {}).get("ask"))
-    provider_ts = quote.get("provider_ts") or (amq or {}).get("provider_ts")
-    fresh = False
-    if provider_ts is not None:
-        fresh = (now_utc() - provider_ts).total_seconds() <= (settings.get("quote_freshness_sec") or 120)
-    elif today_pm:
+    trade_ts = quote.get("provider_ts")
+    book_ts = (amq or {}).get("provider_ts")
+    max_age = settings.get("quote_freshness_sec") or 120
+    fresh = trade_ts is not None and (now_utc() - trade_ts).total_seconds() <= max_age
+    if not fresh and today_pm:
         last_bar_ts = today_pm[-1]["ts_utc"]
         fresh = (now_utc() - last_bar_ts).total_seconds() <= 300
+    book_fresh = book_ts is not None and (now_utc() - book_ts).total_seconds() <= max_age
+    if not fresh and book_fresh:
+        bid, ask = (amq or {}).get("bid"), (amq or {}).get("ask")
+        if bid and ask and ask >= bid > 0:
+            # stale trade print but live book: display the indicative mid,
+            # clearly labeled. BUY still requires a fresh trade (quote_fresh stays False).
+            price = (bid + ask) / 2.0
+            price_indicative = True
+    provider_ts = trade_ts if fresh else (book_ts or trade_ts)
 
     in_premarket = 240 <= cur_minute < 570
-    volume_incomplete = in_premarket and not today_pm  # no extended-hours bars => can't verify PM volume
+    # incomplete when premarket and no reported extended-hours volume has been observed
+    volume_incomplete = in_premarket and pm_volume <= 0
 
     return {
         "price": price,
+        "price_indicative": price_indicative,
         "previous_close": quote.get("previous_close"),
         "gap_pct": F.gap_pct(price, quote.get("previous_close")),
         "pm_volume": pm_volume if today_pm else None,

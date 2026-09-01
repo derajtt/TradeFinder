@@ -73,3 +73,11 @@ def test_structure_features():
 
 def test_dollar_volume():
     assert F.dollar_volume([{"close": 2.0, "volume": 1000}]) == 2000.0
+
+
+def test_estimated_rvol_and_curve():
+    from app.scanner.bars import estimated_rvol, expected_pm_fraction
+    assert expected_pm_fraction(240) == 0.0
+    assert expected_pm_fraction(600) == 0.065          # after 9:30 clamps to last point
+    assert estimated_rvol(0, 1_000_000, 480) is None   # no volume -> no estimate
+    assert estimated_rvol(60_000, None, 480) is None   # unknown avg volume -> None

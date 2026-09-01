@@ -202,6 +202,7 @@ class FmpProvider:
                 "ask": _f(row.get("askPrice")),
                 "bid_size": _f(row.get("bidSize")),
                 "ask_size": _f(row.get("askSize")),
+                "volume": _f(row.get("volume")),  # extended-session cumulative counter
                 "provider_ts": _parse_ts(row.get("timestamp")),
             }
         except Exception:

@@ -1,7 +1,7 @@
 export interface CandidateRow {
   symbol: string; name: string; exchange: string;
   score: number; buy: boolean;
-  price: number | null; gap_pct: number | null;
+  price: number | null; price_indicative?: boolean; gap_pct: number | null;
   rvol: number | null; rvol_confidence: number | null;
   pm_volume: number | null; pm_dollar_volume: number | null;
   float_shares: number | null; shares_outstanding: number | null;

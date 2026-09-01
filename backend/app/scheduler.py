@@ -297,8 +297,9 @@ class Scheduler:
                 try:
                     await self.acc.record(db, sym, obs_price, amq.get("volume"), amq_ts)
                     await db.commit()
-                except Exception:
+                except Exception as e:
                     await db.rollback()
+                    await self._health("warn", "bars", f"{sym}: {type(e).__name__}: {e}")
             async with SessionLocal() as db:
                 today_pm = await barmod.today_pm_bars(db, sym, session_dt)
                 baselines = await barmod.baseline_pm_cum_volumes(db, sym, session_dt,
@@ -365,7 +366,8 @@ class Scheduler:
             "symbol": sym, "name": (profile or {}).get("name") or quote.get("name", ""),
             "exchange": (profile or {}).get("exchange") or quote.get("exchange", ""),
             "score": result["score"], "buy": result["buy"],
-            "price": feats.get("price"), "gap_pct": feats.get("gap_pct"),
+            "price": feats.get("price"), "price_indicative": feats.get("price_indicative"),
+            "gap_pct": feats.get("gap_pct"),
             "rvol": feats.get("rvol"), "rvol_confidence": feats.get("rvol_confidence"),
             "pm_volume": feats.get("pm_volume"), "pm_dollar_volume": feats.get("pm_dollar_volume"),
             "float_shares": feats.get("float_shares"),
