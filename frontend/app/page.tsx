@@ -4,6 +4,7 @@ import CandidateTable from '../components/CandidateTable';
 import RadarTable, { type RadarRow } from '../components/RadarTable';
 import SessionStrip from '../components/SessionStrip';
 import FunnelStrip from '../components/FunnelStrip';
+import NoonCard from '../components/NoonCard';
 import ProfileTabs from '../components/ProfileTabs';
 import PositionsTable from '../components/PositionsTable';
 import RejectedTable from '../components/RejectedTable';
@@ -116,6 +117,7 @@ export default function Dashboard() {
       </div>
       <CandidateTable rows={rows} updatedSyms={updated} onSelect={onSelect} />
 
+      <NoonCard />
       <PositionsTable onSelect={onSelect} profile={profile} />
       <RejectedTable onSelect={onSelect} profile={profile} />
       <RadarTable rows={radar} onSelect={onSelect} />

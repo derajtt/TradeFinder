@@ -18,14 +18,19 @@ from sqlalchemy import select
 
 from .db import SessionLocal
 from .models import (BuySignal, Candidate, CandidateFeatureSnapshot, HealthEvent,
-                     ProviderRequest, RejectedCandidate, ScannerRun, SecFiling)
+                     PaperPosition, ProviderRequest, RejectedCandidate,
+                     ScannerRun, SecFiling)
 from .providers.fmp import looks_common_stock
 from .providers.fmp import EntitlementError
 from .scanner import bars as barmod
 from .scanner import funnel
 from .scoring.engine import STRATEGY_VERSION, score_candidate, universe_gates
 from .strategy import paper as paper_engine
+from .strategy import platform as mplat
+from .strategy.engines import ENGINES, REGIME_ALLOW
+from .strategy.engines import regime as regime_fn
 from .strategy.profiles import get_profiles, profile_settings
+from .strategy.registry import (CRYPTO_UNIVERSE, ETF_UNIVERSE, MODELS, PAIRS)
 from .strategy.dilution import assess as assess_dilution
 from .strategy.gates import evaluate as evaluate_v2
 from .strategy.tiers import tier_for
@@ -55,6 +60,10 @@ class Scheduler:
         self._sweep_idx: int = 0
         self._news_quoted: Dict[str, float] = {}
         self._first_seen: Dict[str, str] = {}   # f"{sym}:{date}" -> iso ts
+        self.mctx = None            # shared multi-model market context
+        self._daily_models_ran: str = ""
+        self.last_regime: Dict[str, Any] = {"state": "uncertain",
+                                            "why": "not yet evaluated"}
         self.task: Optional[asyncio.Task] = None
         self.running = False
         self.state: Dict[str, Any] = {"phase": "idle", "last_cycle_at": None,
@@ -120,11 +129,19 @@ class Scheduler:
                     await self._tracking_cycle(settings, finalize=False)
                     if self.state["cycles"] % 5 == 0:
                         await self._discovery_cycle(settings, phase)  # keep candidate table fresh
+                    if self.state["cycles"] % 3 == 0:
+                        await self._models_cycle(settings, phase)
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
+                    if self.state["cycles"] % 10 == 0:
+                        await self._models_cycle(settings, phase)  # crypto lane
                     await self._nightly_research(settings)
                     interval = max(interval, 300)
-                else:
+                elif self.state["cycles"] % 10 == 0 and phase == "closed":
+                    await self._models_cycle(settings, phase)      # crypto is 24/7
+                    nxt = next_scan_start()
+                    self.state["next_run_at"] = nxt.isoformat()
+                elif True:
                     nxt = next_scan_start()
                     self.state["next_run_at"] = nxt.isoformat()
                     await broadcaster.publish("scanner", {"phase": "closed",
@@ -793,6 +810,94 @@ class Scheduler:
                         shadow_until=now_utc() + timedelta(hours=8)))
                     await db.commit()
 
+    async def _models_cycle(self, settings, phase):
+        """One pass of the 14 non-scalper model engines over the shared bounded
+        universes. Cadence: intraday engines each call (RTH; crypto 24/7),
+        daily/weekly/monthly engines once per trading day."""
+        if self.mctx is None:
+            self.mctx = mplat.ModelContext(self.ctx.fmp)
+        t = now_et()
+        today = str(t.date())
+        run_daily = (self._daily_models_ran != today and
+                     (t.hour > 15 or phase in ("afterhours", "closed")))
+        # shared context
+        ctx: Dict[str, Any] = {"bars_daily": {}, "bars_5m": {}}
+        stock_syms = list(ETF_UNIVERSE)
+        crypto_syms = list(CRYPTO_UNIVERSE)
+        for s in stock_syms + crypto_syms:
+            ctx["bars_daily"][s] = await self.mctx.daily(s)
+        ctx["spy_daily"] = ctx["bars_daily"].get("SPY") or []
+        self.last_regime = regime_fn(ctx)
+        reg_state = self.last_regime["state"]
+        if reg_state == "high_risk":
+            await self._health("warn", "regime",
+                               f"high_risk: {self.last_regime['why']} — models abstain")
+            return
+        intraday_ok = phase == "regular"
+        live_syms = (stock_syms if intraday_ok else []) + crypto_syms
+        for s in live_syms:
+            ctx["bars_5m"][s] = await self.mctx.m5(s)
+        ctx["earnings"] = await self.mctx.earnings_today() if run_daily else {}
+        ctx["insider_clusters"] = {}
+        ctx["fundamentals"] = {}
+        profiles_cfg = get_profiles(settings)
+        fired = 0
+        for mid, meta in MODELS.items():
+            if meta["engine"] == "scalper" or not meta.get("build"):
+                continue
+            pcfg = profiles_cfg.get(mid) or {}
+            if pcfg.get("enabled") is False:
+                continue
+            eng = ENGINES.get(meta["engine"])
+            if eng is None:
+                continue
+            allowed = REGIME_ALLOW.get(meta["engine"], {"trend", "range",
+                                                        "uncertain"})
+            if reg_state not in allowed:
+                continue
+            cadence = meta.get("cadence", "intraday")
+            if cadence == "intraday" and not (intraday_ok or
+                                              "crypto" in meta["asset_classes"]):
+                continue
+            if cadence in ("daily", "weekly", "monthly") and not run_daily:
+                continue
+            cfg = (pcfg.get("overrides") or {})
+            if meta["engine"] == "pairs":
+                symbols = [f"{a}|{b}" for a, b in PAIRS]
+            elif meta["asset_classes"] == ["crypto"]:
+                symbols = crypto_syms
+            elif "crypto" in meta["asset_classes"]:
+                symbols = (stock_syms if intraday_ok or cadence != "intraday"
+                           else []) + crypto_syms
+            else:
+                symbols = stock_syms if (intraday_ok or cadence != "intraday") else []
+            for sym in symbols:
+                try:
+                    v = eng(ctx, sym, cfg)
+                except Exception as e:
+                    await self._health("warn", f"model:{mid}",
+                                       f"{sym}: {type(e).__name__}: {e}")
+                    continue
+                if not v or v["action"] != "buy":
+                    continue
+                base = sym.split("|")[0]
+                q = (ctx["bars_5m"].get(base) or ctx["bars_daily"].get(base) or [])
+                qp = q[-1]["c"] if q else v["entry"]
+                sig = await mplat.record_model_signal(mid, base, v, qp, today,
+                                                      settings)
+                if sig:
+                    fired += 1
+                    await broadcaster.publish("buy_signal", {
+                        "symbol": base, "price": v["entry"], "type": "buy",
+                        "model": mid, "score": v["score"],
+                        "signal_uid": sig.signal_uid,
+                        "initiated_at": sig.initiated_at.isoformat()})
+        if run_daily:
+            self._daily_models_ran = today
+        if fired:
+            await self._health("info", "models", f"{fired} model signal(s) fired "
+                               f"(regime {reg_state})")
+
     async def _nightly_research(self, settings):
         """After-close research: replay the completed day through the frozen
         engine, update challenger stats, and audit-log the promotion decision.
@@ -863,9 +968,12 @@ class Scheduler:
                 select(BuySignal).where(BuySignal.status == "active",
                                         BuySignal.is_demo == False)  # noqa: E712
             )).scalars().all()
-            if not sigs:
+            open_model_pos = (await db.execute(select(PaperPosition).where(
+                PaperPosition.status == "open"))).scalars().all()
+            symbols = sorted({s.symbol for s in sigs} |
+                             {p.symbol for p in open_model_pos})
+            if not symbols:
                 return
-            symbols = sorted({s.symbol for s in sigs})
             phase_now = session_phase()
             try:
                 quotes = {q["symbol"]: q for q in await self.ctx.fmp.quotes(symbols)}
@@ -917,6 +1025,12 @@ class Scheduler:
             try:
                 pos_updates = await paper_engine.update_positions(
                     db, quotes, settings)
+                pos_updates += await mplat.settle_positions(db, quotes, settings)
+                locked = await mplat.finalize_noon_outcomes(db, quotes)
+                if locked:
+                    await self._health("info", "outcomes",
+                                       f"{locked} noon outcome(s) locked "
+                                       f"({mplat.NOON_POLICY})")
             except Exception as e:
                 pos_updates = []
                 await self._health("warn", "paper", f"{type(e).__name__}: {e}")

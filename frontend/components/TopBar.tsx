@@ -6,6 +6,7 @@ import type { StatusPayload } from '../lib/types';
 
 export default function TopBar() {
   const [status, err, reload] = usePolling<StatusPayload>('/api/status', 15000);
+  const [modelsResp] = usePolling<{ models: { account: { equity: number } }[]; regime: any }>('/api/models', 60000);
   const [clock, setClock] = useState('');
   useEventStream({ buy_signal: () => reload(), scanner: () => {} });
 
@@ -42,6 +43,17 @@ export default function TopBar() {
           : <span className="fresh ok">● no throttles</span>}
       </span>
       <span className="tb-item">AI mo. <b>${status?.ai_usage_month?.est_cost_usd?.toFixed(2) ?? '—'}</b></span>
+      {modelsResp?.regime && (
+        <span className={`regime-chip regime-${modelsResp.regime.state}`}
+          title={`Regime Controller: ${modelsResp.regime.why}`}>
+          {modelsResp.regime.state}
+        </span>
+      )}
+      {modelsResp?.models && (
+        <span className="tb-item" title="Total paper equity across all model accounts (each started at $10,000)">
+          Σ paper <b>${(modelsResp.models.reduce((s, m) => s + (m.account?.equity ?? 0), 0) / 1000).toFixed(1)}k</b>
+        </span>
+      )}
       <span className="tb-item faint">{status?.strategy_version}</span>
     </header>
   );

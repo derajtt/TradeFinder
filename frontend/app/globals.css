@@ -269,3 +269,16 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 
 .ptab:hover { color: var(--text); border-color: var(--text-faint); }
 .ptab.active { background: var(--bg-hover); font-weight: 750; }
 .ptab.off { opacity: 0.55; }
+
+/* nav groups + platform additions */
+.nav-link.nav-group { cursor: pointer; background: none; border: none; width: 100%; text-align: left; }
+.nav-link.sub { padding: 5px 10px 5px 22px; }
+.side { overflow-y: auto; }
+.regime-chip { padding: 3px 11px; border-radius: 999px; font: 700 10px/1.6 var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+.regime-trend { background: var(--buy-soft); color: var(--buy); }
+.regime-range { background: var(--accent-soft); color: var(--accent); }
+.regime-high_risk { background: var(--risk-soft); color: var(--risk); }
+.regime-uncertain, .regime-event { background: var(--warn-soft); color: var(--warn); }
+.acct-card { position: relative; overflow: hidden; }
+.acct-card .ret-big { font: 800 30px/1.1 var(--mono); }
+.model-hero { border-left: 4px solid var(--accent); padding-left: 16px; }

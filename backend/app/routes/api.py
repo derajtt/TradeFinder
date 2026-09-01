@@ -21,6 +21,9 @@ from ..models import (AiUsage, BtJob, BuySignal, Candidate,
                       SignalPriceCheckpoint, Symbol, SymbolReferenceVersion)
 from ..analytics import canonical_report, effective_lifecycle
 from ..strategy.profiles import DEFAULT_PROFILES, get_profiles
+from ..models import LockedOutcome, PaperAccount
+from ..strategy.registry import (CRYPTO_UNIVERSE, ETF_UNIVERSE, MODELS,
+                                 RESEARCH_ONLY, STARTING_CASH)
 from ..scoring.engine import DEFAULT_SETTINGS, STRATEGY_VERSION
 from ..settings_service import get_settings, update_settings
 from ..signals.service import metrics_with_outcome, signal_metrics
@@ -538,3 +541,166 @@ async def backtest_report(db: AsyncSession = Depends(get_session)):
                 "note": "No backtest imported yet. Run backend/scripts/backtest_run.py."}
     return {"available": True, "created_at": job.created_at.isoformat(),
             "kind": job.kind, "config_hash": job.config_hash, "result": job.result}
+
+
+@router.get("/models")
+async def models_list(request: Request, db: AsyncSession = Depends(get_session)):
+    """Registry + per-model account, signal counts, and enablement."""
+    s = await _get_settings(db)
+    profs = get_profiles(s)
+    accounts = {a.model_id: a for a in
+                (await db.execute(select(PaperAccount))).scalars().all()}
+    sig_counts: Dict[str, Dict[str, int]] = {}
+    rows = (await db.execute(select(BuySignal.profile, BuySignal.lifecycle,
+                                    func.count(BuySignal.id))
+                             .where(BuySignal.is_demo == False)  # noqa: E712
+                             .group_by(BuySignal.profile, BuySignal.lifecycle))).all()
+    for prof, lc, n in rows:
+        sig_counts.setdefault(prof or "primary", {})[lc or "legacy"] = n
+    shared = app_state(request)
+    sched = shared.get("scheduler")
+    out = []
+    for mid, meta in MODELS.items():
+        acc = accounts.get(mid)
+        pcfg = profs.get(mid) or {}
+        out.append({
+            "id": mid, **{k: meta.get(k) for k in
+                          ("name", "engine", "asset_classes", "cadence",
+                           "horizon", "color", "edge", "universe",
+                           "experimental", "data_notes", "hypothesis")},
+            "enabled": pcfg.get("enabled", True),
+            "account": ({"cash": acc.cash, "equity": acc.equity,
+                         "realized_pnl": acc.realized_pnl,
+                         "max_drawdown_pct": acc.max_drawdown_pct,
+                         "trades_closed": acc.trades_closed, "wins": acc.wins,
+                         "return_pct": round((acc.equity / acc.starting_cash - 1)
+                                             * 100, 2)}
+                        if acc else {"cash": STARTING_CASH,
+                                     "equity": STARTING_CASH,
+                                     "realized_pnl": 0, "max_drawdown_pct": 0,
+                                     "trades_closed": 0, "wins": 0,
+                                     "return_pct": 0.0}),
+            "signals": sig_counts.get(mid, {}),
+        })
+    return {"models": out, "research_only": RESEARCH_ONLY,
+            "regime": (getattr(sched, "last_regime", None) if sched else None),
+            "universes": {"stocks": ETF_UNIVERSE, "crypto": CRYPTO_UNIVERSE}}
+
+
+@router.get("/competition")
+async def competition(db: AsyncSession = Depends(get_session)):
+    """The $10,000 leaderboards. Cohort: live forward paper only."""
+    accs = (await db.execute(select(PaperAccount))).scalars().all()
+    cards = []
+    for a in accs:
+        meta = MODELS.get(a.model_id, {})
+        wr = (a.wins / a.trades_closed) if a.trades_closed else None
+        cards.append({"model_id": a.model_id,
+                      "name": meta.get("name", a.model_id),
+                      "color": meta.get("color", "#93a1bd"),
+                      "experimental": meta.get("experimental", False),
+                      "season": a.season, "equity": a.equity, "cash": a.cash,
+                      "return_pct": round((a.equity / a.starting_cash - 1) * 100, 2),
+                      "realized_pnl": a.realized_pnl,
+                      "max_drawdown_pct": a.max_drawdown_pct,
+                      "trades": a.trades_closed, "wins": a.wins,
+                      "win_rate": round(wr, 3) if wr is not None else None})
+    boards = {}
+    with_trades = [c for c in cards if c["trades"] >= 1]
+    boards["net_return"] = sorted(cards, key=lambda c: c["return_pct"],
+                                  reverse=True)[:5]
+    boards["win_rate"] = sorted(with_trades,
+                                key=lambda c: (c["win_rate"] or 0, c["trades"]),
+                                reverse=True)[:5]
+    boards["drawdown"] = sorted(with_trades,
+                                key=lambda c: c["max_drawdown_pct"],
+                                reverse=True)[:5]
+    return {"cards": sorted(cards, key=lambda c: c["equity"], reverse=True),
+            "leaderboards": boards, "cohort": "live_paper",
+            "note": ("Every model starts with $10,000, identical costs and "
+                     "conservative fills. No winner is declared without "
+                     "sufficient forward sample.")}
+
+
+@router.get("/chart/bars")
+async def chart_bars(symbol: str, tf: str = "5min", request: Request = None,
+                     db: AsyncSession = Depends(get_session)):
+    """Bars for the Chart Workstation (stocks + entitled crypto)."""
+    shared = app_state(request)
+    ctx = shared.get("ctx")
+    symbol = symbol.upper()
+    if tf not in ("5min", "1hour", "daily"):
+        raise HTTPException(400, "tf must be 5min|1hour|daily")
+    try:
+        if tf == "daily":
+            data = await ctx.fmp._get("historical-price-eod/full",
+                                      {"symbol": symbol, "from": "2024-01-01",
+                                       "to": "2027-01-01"}, cache_ttl=1800,
+                                      endpoint_name="chart-eod")
+            rows = sorted(data or [], key=lambda r: r.get("date") or "")
+            bars = [{"time": r["date"], "open": r["open"], "high": r["high"],
+                     "low": r["low"], "close": r["close"],
+                     "volume": r.get("volume") or 0} for r in rows
+                    if r.get("close")]
+        else:
+            from datetime import date as _date, timedelta as _td
+            frm = str(_date.today() - _td(days=10 if tf == "5min" else 60))
+            data = await ctx.fmp._get(f"historical-chart/{tf}",
+                                      {"symbol": symbol, "from": frm,
+                                       "to": str(_date.today()),
+                                       "extended": "true"}, cache_ttl=180,
+                                      endpoint_name=f"chart-{tf}")
+            rows = sorted(data or [], key=lambda r: r.get("date") or "")
+            bars = []
+            for r in rows:
+                try:
+                    from zoneinfo import ZoneInfo as _Z
+                    ts = datetime.fromisoformat(r["date"]).replace(
+                        tzinfo=_Z("America/New_York"))
+                    bars.append({"time": int(ts.timestamp()), "open": r["open"],
+                                 "high": r["high"], "low": r["low"],
+                                 "close": r["close"],
+                                 "volume": r.get("volume") or 0})
+                except (KeyError, ValueError):
+                    continue
+        return {"symbol": symbol, "tf": tf, "bars": bars[-1500:],
+                "quality": "LIVE" if bars else "UNAVAILABLE"}
+    except Exception as e:
+        return {"symbol": symbol, "tf": tf, "bars": [],
+                "quality": "UNAVAILABLE", "error": type(e).__name__}
+
+
+@router.get("/outcomes/noon")
+async def noon_outcomes(db: AsyncSession = Depends(get_session)):
+    """Locked PREMARKET_SCALPER_OUTCOME_V1 card data."""
+    rows = (await db.execute(
+        select(LockedOutcome, BuySignal.symbol, BuySignal.initiated_at)
+        .join(BuySignal, BuySignal.id == LockedOutcome.signal_id)
+        .order_by(desc(LockedOutcome.id)).limit(200))).all()
+    out, counts = [], {"WIN_10_TOUCH": 0, "WIN_NOON_GREEN": 0,
+                       "LOSS_NOON_RED": 0, "FLAT": 0, "INCOMPLETE": 0}
+    for lo, sym, init in rows:
+        counts[lo.outcome_class] = counts.get(lo.outcome_class, 0) + 1
+        out.append({"symbol": sym, "class": lo.outcome_class,
+                    "call_price": lo.call_price, "reference": lo.reference_price,
+                    "quality": lo.reference_quality,
+                    "initiated_at": init.isoformat(),
+                    "locked_at": lo.locked_at.isoformat()})
+    wins = counts["WIN_10_TOUCH"] + counts["WIN_NOON_GREEN"]
+    losses = counts["LOSS_NOON_RED"]
+    denom = wins + losses + counts["FLAT"]
+    import math as _m
+    wr = wins / denom if denom else None
+    lb = None
+    if denom:
+        z, p = 1.96, wr
+        den = 1 + z * z / denom
+        lb = round(((p + z * z / (2 * denom)) - z * _m.sqrt(
+            p * (1 - p) / denom + z * z / (4 * denom * denom))) / den, 4)
+    return {"policy": "PREMARKET_SCALPER_OUTCOME_V1", "counts": counts,
+            "call_win_rate": round(wr, 4) if wr is not None else None,
+            "win_rate_lb": lb, "denominator": denom,
+            "note": "INCOMPLETE excluded from denominator; a +10% touch locks a "
+                    "WIN even if price later fades. Call accuracy ≠ captured "
+                    "profit.",
+            "rows": out[:60]}

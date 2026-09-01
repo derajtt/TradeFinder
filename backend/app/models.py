@@ -408,3 +408,42 @@ class BtCache(Base):
     cache_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class PaperAccount(Base):
+    """Isolated $10,000 paper ledger per model per season. Equity derives from
+    the ledger, never browser memory."""
+    __tablename__ = "paper_accounts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_id: Mapped[str] = mapped_column(String(32), index=True)
+    season: Mapped[int] = mapped_column(Integer, default=1)
+    starting_cash: Mapped[float] = mapped_column(Float, default=10000.0)
+    cash: Mapped[float] = mapped_column(Float, default=10000.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    equity: Mapped[float] = mapped_column(Float, default=10000.0)
+    max_equity: Mapped[float] = mapped_column(Float, default=10000.0)
+    max_drawdown_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    trades_closed: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 default=utcnow, onupdate=utcnow)
+    __table_args__ = (UniqueConstraint("model_id", "season", name="uq_account"),)
+
+
+class LockedOutcome(Base):
+    """Immutable call-accuracy results (e.g. PREMARKET_SCALPER_OUTCOME_V1).
+    Corrections append revisions; the original class never mutates."""
+    __tablename__ = "locked_outcomes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("buy_signals.id"), index=True)
+    policy: Mapped[str] = mapped_column(String(48), index=True)
+    outcome_class: Mapped[str] = mapped_column(String(24))  # WIN_10_TOUCH|WIN_NOON_GREEN|LOSS_NOON_RED|FLAT|INCOMPLETE
+    call_price: Mapped[float] = mapped_column(Float)
+    reference_price: Mapped[float] = mapped_column(Float, nullable=True)
+    reference_quality: Mapped[str] = mapped_column(String(16), default="LIVE")  # LIVE|ESTIMATED
+    touch_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revision_of: Mapped[int] = mapped_column(Integer, nullable=True)
+    revision_reason: Mapped[str] = mapped_column(String(200), default="")
+    __table_args__ = (UniqueConstraint("signal_id", "policy", "revision_of",
+                                       name="uq_lock"),)
