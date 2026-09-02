@@ -37,7 +37,8 @@ from .strategy.dilution import assess as assess_dilution
 from .strategy.gates import evaluate as evaluate_v2
 from .strategy.tiers import tier_for
 from .strategy.versions import VERSIONS
-from .settings_service import ensure_strategy_version, get_settings
+from .settings_service import (ensure_strategy_version, get_settings,
+                               update_settings)
 from .signals import service as sigsvc
 from .sse import broadcaster
 from .util.timeutil import (ET, is_trading_day, next_scan_start, now_et, now_utc,
@@ -900,6 +901,39 @@ class Scheduler:
                         shadow_until=now_utc() + timedelta(hours=8)))
                     await db.commit()
 
+    async def _cadence_marks(self) -> Dict[str, str]:
+        """Last-run keys for the daily/weekly/monthly lanes, read from storage."""
+        try:
+            async with SessionLocal() as db:
+                st = await get_settings(db)
+            raw = st.get("model_cadence_runs") or {}
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            return raw if isinstance(raw, dict) else {}
+        except Exception:
+            # Fall back to the in-memory copy rather than re-running a
+            # rebalance on a storage hiccup.
+            return {"daily": self._daily_models_ran,
+                    "weekly": self._weekly_models_ran,
+                    "monthly": self._monthly_models_ran}
+
+    async def _set_cadence_marks(self, daily=None, weekly=None, monthly=None):
+        marks = await self._cadence_marks()
+        if daily:
+            marks["daily"] = daily
+            self._daily_models_ran = daily
+        if weekly:
+            marks["weekly"] = weekly
+            self._weekly_models_ran = weekly
+        if monthly:
+            marks["monthly"] = monthly
+            self._monthly_models_ran = monthly
+        try:
+            async with SessionLocal() as db:
+                await update_settings(db, {"model_cadence_runs": marks})
+        except Exception as e:
+            log.warning("could not persist cadence marks: %s", e)
+
     async def _load_daily_for(self, ctx, symbols, cap: int = 25):
         """Fetch daily bars for symbols an engine has become eligible for.
         Capped so a wide EDGAR day cannot blow the shared API budget."""
@@ -927,12 +961,16 @@ class Scheduler:
         # the close. Without the trading-day test they re-ran on Saturday and
         # Sunday against Friday's unchanged bars and opened a duplicate position
         # each pass, debiting the ledger every time.
-        run_daily = (self._daily_models_ran != today and trading_day
-                     and phase in ("afterhours", "closed"))
         iso_year, iso_week, _ = t.isocalendar()
         week_key, month_key = f"{iso_year}-W{iso_week}", f"{t.year}-{t.month:02d}"
-        run_weekly = run_daily and self._weekly_models_ran != week_key
-        run_monthly = run_daily and self._monthly_models_ran != month_key
+        # These guards must survive a process restart. Held only in memory, a
+        # deploy reset them and the next pass re-ran the daily/weekly/monthly
+        # rebalance — re-buying a book the model already held.
+        marks = await self._cadence_marks()
+        run_daily = (marks.get("daily") != today and trading_day
+                     and phase in ("afterhours", "closed"))
+        run_weekly = run_daily and marks.get("weekly") != week_key
+        run_monthly = run_daily and marks.get("monthly") != month_key
         # shared context
         ctx: Dict[str, Any] = {"bars_daily": {}, "bars_5m": {}}
         stock_syms = list(ETF_UNIVERSE)
@@ -1096,12 +1134,11 @@ class Scheduler:
                                  if hb.get("day") == today else model_fired,
                 "day": today, "cadence": cadence,
             })
-        if run_daily:
-            self._daily_models_ran = today
-        if run_weekly:
-            self._weekly_models_ran = week_key
-        if run_monthly:
-            self._monthly_models_ran = month_key
+        if run_daily or run_weekly or run_monthly:
+            await self._set_cadence_marks(
+                daily=today if run_daily else None,
+                weekly=week_key if run_weekly else None,
+                monthly=month_key if run_monthly else None)
         if fired:
             await self._health("info", "models", f"{fired} model signal(s) fired "
                                f"(regime {reg_state})")

@@ -218,6 +218,16 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         if await sigsvc.recent_signal_exists(db, symbol, session_date,
                                              VERSIONS["strategy_version"], fp):
             return None
+        # A model must never open a second position in something it already
+        # holds. The per-day fingerprint above keys on session_date, so a rerun
+        # on a NEW date — which is what a process restart triggers for the
+        # daily/weekly/monthly lanes — would otherwise re-buy the whole book.
+        held = (await db.execute(select(PaperPosition.id).where(
+            PaperPosition.status == "open",
+            PaperPosition.profile == model_id,
+            PaperPosition.symbol == symbol))).first()
+        if held:
+            return None
         fill = round(verdict["entry"] * (1 + slip), 4)
         sig = await sigsvc.create_buy_signal(
             db, symbol=symbol, session_date=session_date,
