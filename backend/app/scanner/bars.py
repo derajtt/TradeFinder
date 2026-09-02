@@ -12,7 +12,7 @@ RVOL confidence model:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
@@ -160,3 +160,52 @@ def estimated_rvol(pm_volume: float, avg_daily_volume: Optional[float],
     # Cap: very early premarket the expected fraction is tiny, which makes the
     # estimate explode for a few thousand shares. 50x is plenty to clear any gate.
     return min(50.0, pm_volume / (avg_daily_volume * frac))
+
+
+async def seed_pm_bars_from_provider(fmp, symbol: str, session_date: str) -> List[dict]:
+    """Today's premarket (04:00–09:30 ET) from FMP's 5-minute extended series.
+
+    Self-accumulated 1-minute prints start EMPTY for every symbol the moment it
+    enters the shortlist, so participation, dollar volume, VWAP and the
+    high/low structure were all computed from a handful of bars — three of the
+    scalper's four binding gates failed >97% of the time for that one reason.
+    The provider already has the whole session from 04:00; use it.
+    """
+    from datetime import datetime as _dt
+    from ..util.timeutil import ET
+    try:
+        rows = await fmp._get("historical-chart/5min",
+                              {"symbol": symbol, "from": session_date,
+                               "to": session_date, "extended": "true"},
+                              cache_ttl=120, endpoint_name="5min-pm-seed")
+    except Exception:
+        return []
+    out = []
+    for r in (rows if isinstance(rows, list) else []):
+        try:
+            ts = _dt.fromisoformat(r["date"]).replace(tzinfo=ET)
+        except (KeyError, ValueError):
+            continue
+        mod = ts.hour * 60 + ts.minute
+        if not (240 <= mod < 570):
+            continue
+        try:
+            out.append({"ts_utc": ts.astimezone(timezone.utc), "minute_of_day": mod,
+                        "open": float(r["open"]), "high": float(r["high"]),
+                        "low": float(r["low"]), "close": float(r["close"]),
+                        "volume": float(r.get("volume") or 0), "source": "provider_5m"})
+        except (KeyError, TypeError, ValueError):
+            continue
+    out.sort(key=lambda b: b["minute_of_day"])
+    return out
+
+
+def merge_pm_bars(accumulated: List[dict], seeded: List[dict]) -> List[dict]:
+    """Own 1-minute prints win for minutes we observed; provider 5-minute bars
+    fill everything else. Result is sorted by minute."""
+    have = {b["minute_of_day"] for b in accumulated}
+    merged = list(accumulated) + [b for b in seeded
+                                  if not any(m in have for m in range(b["minute_of_day"],
+                                                                      b["minute_of_day"] + 5))]
+    merged.sort(key=lambda b: b["minute_of_day"])
+    return merged

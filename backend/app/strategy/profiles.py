@@ -25,7 +25,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
                        "expected to trade more and win less; for comparison only.",
         "overrides": {"watch_max_gap_pct": 150.0, "max_ext_above_vwap_pct": 35.0,
                       "rotation_hard_cap": 2.0, "min_pm_dollar_volume": 50_000,
-                      "watch_score_min": 30},
+                      "watch_score_min": 30, "min_score_for_buy": 50},
     },
     "penny": {
         "name": "Penny", "enabled": False, "color": "#f87171",

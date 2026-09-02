@@ -23,7 +23,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_rvol_for_buy": 3.0,
     "allow_estimated_rvol": True,
     "est_rvol_buy_multiplier": 1.5,
-    "min_score_for_buy": 75,
+    "min_score_for_buy": 55,   # 75 was above the observed max ever (61.7)
     # "advisory" lets every model trade in every regime while recording whether
     # the regime favoured the setup, so the value of gating can be measured
     # from results. "block" restores hard abstention.
@@ -34,6 +34,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # How many of the day's most-active / biggest-gainer names join the
     # intraday model universe alongside the core ETFs and large caps.
     "movers_cap": 35,
+    # No NEW model entries after this ET time. First session of data: entries
+    # at 10:00 averaged +0.29R over 76 trades; 14:00 averaged -0.62R, and a
+    # 15:55 flatten leaves too little room for a late trade to work.
+    "model_entry_cutoff_et": "14:00",
     "min_catalyst_confidence": 0.6,
     "max_extension_from_pm_high_pct": 25.0,
     "quote_freshness_sec": 120,

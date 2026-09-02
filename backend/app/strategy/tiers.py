@@ -2,12 +2,12 @@
 from typing import Any, Dict, Optional
 
 TIERS = [
-    {"name": "T1_penny", "lo": 0.10, "hi": 0.2499, "max_spread_pct": 2.0,
+    {"name": "T1_penny", "lo": 0.10, "hi": 0.2499, "max_spread_pct": 3.0,
      "min_quote_size_usd": 2000, "min_pm_dollar_vol": 250_000,
      "require_grade": ("A",), "max_risk_pct": 4.0,
      "note": "special high-risk penny tier: hard Grade-A catalyst, tight spread, "
              "extra dilution/shell/reverse-split protections"},
-    {"name": "T2", "lo": 0.25, "hi": 0.4999, "max_spread_pct": 3.0,
+    {"name": "T2", "lo": 0.25, "hi": 0.4999, "max_spread_pct": 4.0,
      "min_quote_size_usd": 1500, "min_pm_dollar_vol": 150_000,
      "require_grade": ("A", "B"), "max_risk_pct": 5.0, "note": ""},
     {"name": "T3", "lo": 0.50, "hi": 0.9999, "max_spread_pct": 3.5,

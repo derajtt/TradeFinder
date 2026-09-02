@@ -434,7 +434,7 @@ def test_context_fetches_have_no_try_else_that_discards_success():
     block = src[src.index('ctx["insider_clusters"] = await'):src.index('model_cfg = settings.get')]
     assert "else:" not in block, "try-else in the context fetch block"
     assert block.count('ctx["insider_clusters"] = {}') == 1     # only the except path
-    assert 'ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)' in block
+    assert 'ctx["fundamentals"] = await self.mctx.fundamentals(list(ETF_UNIVERSE))' in block
     # fundamentals must not be nested under the insider except
     assert re.search(r'except Exception as e:\n\s+ctx\["insider_clusters"\] = \{\}\n\s+await self\._health\("warn", "insiders"[^\n]*\n\s+try:\n\s+ctx\["fundamentals"\]', block) is None
 

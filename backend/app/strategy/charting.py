@@ -108,7 +108,7 @@ def detect(bars: List[dict]) -> Dict[str, Any]:
     med_v = sorted(b["v"] for b in bars)[len(bars) // 2] or 1
     for i in range(20, len(bars)):
         b = bars[i]
-        vol_ok = b["v"] >= 1.3 * med_v
+        vol_ok = b["v"] >= 2.0 * med_v
         for z in res:
             if max(z["idxs"]) + 3 >= i:      # zone not yet confirmed at bar i
                 continue

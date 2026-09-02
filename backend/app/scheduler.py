@@ -33,6 +33,7 @@ from .strategy import platform as mplat
 from .strategy.engines import ENGINES, REGIME_ALLOW
 from .strategy.engines import regime as regime_fn
 from .strategy.profiles import get_profiles, profile_settings
+from .strategy.indicators import atr
 from .strategy.registry import (CRYPTO_UNIVERSE, ETF_UNIVERSE, MODELS, PAIRS)
 from .strategy.dilution import assess as assess_dilution
 from .strategy.gates import evaluate as evaluate_v2
@@ -119,8 +120,8 @@ class Scheduler:
             async with SessionLocal() as db:
                 db.add(HealthEvent(level=level, component=component, message=message[:2000]))
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as e:      # cannot recurse into _health here
+                log.warning("health event not persisted (%s/%s): %s", level, component, e)
 
     def _seed_heartbeats(self):
         """Give every registry model a heartbeat before the first pass, so a
@@ -375,8 +376,8 @@ class Scheduler:
                         try:
                             await self.acc.record(db, sym, q.get("price"), q.get("volume"),
                                                   q.get("provider_ts"))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("bar accumulate failed for %s: %s", sym, e)
                     await db.commit()
             scored_pool = []
             for sym in list(dict.fromkeys(list(pre) + [s_ for s_ in quotes if s_ in pool])):
@@ -552,6 +553,14 @@ class Scheduler:
                     await self._health("warn", "bars", f"{sym}: {type(e).__name__}: {e}")
             async with SessionLocal() as db:
                 today_pm = await barmod.today_pm_bars(db, sym, session_dt)
+                # Thin self-accumulated history (a symbol that just entered the
+                # shortlist) is filled from the provider's own 5-minute premarket
+                # bars, so participation, $-volume, VWAP and structure reflect
+                # the whole session rather than the last few minutes we saw.
+                if sum(1 for b in today_pm if (b.get("volume") or 0) > 0) < 6:
+                    seeded = await barmod.seed_pm_bars_from_provider(self.ctx.fmp, sym, session_dt)
+                    if seeded:
+                        today_pm = barmod.merge_pm_bars(today_pm, seeded)
                 baselines = await barmod.baseline_pm_cum_volumes(db, sym, session_dt,
                                                                  cur_minute)
         feats = funnel.compute_market_features(
@@ -1006,10 +1015,14 @@ class Scheduler:
         # Core ETFs/large caps plus the day's real movers. The fixed 26-name
         # list is where liquidity is, but not where intraday setups are.
         movers = await self.mctx.movers(cap=int(settings.get("movers_cap") or 50))
-        stock_syms = list(dict.fromkeys(list(ETF_UNIVERSE) + movers))
+        # The scalper's enriched premarket runners are the day's real movers
+        # and are already fetched — adding them costs nothing.
+        radar = [c.get("symbol") for c in (getattr(self.ctx, "radar_live", None) or [])[:40]
+                 if c.get("symbol")]
+        stock_syms = list(dict.fromkeys(list(ETF_UNIVERSE) + movers + radar))
         crypto_syms = list(CRYPTO_UNIVERSE)
         hb_universe = {"core": len(ETF_UNIVERSE), "movers": len(movers),
-                       "total": len(stock_syms)}
+                       "radar": len(radar), "total": len(stock_syms)}
         # Both legs of every pair need daily bars. GLD and XOP are not in
         # ETF_UNIVERSE, so ("GDX","GLD") and ("XLE","XOP") could never resolve
         # and two of the five pairs were permanently dead.
@@ -1158,6 +1171,12 @@ class Scheduler:
             else:
                 symbols = stock_syms if (intraday_ok or cadence != "intraday") else []
             scanned = with_data = errors = model_fired = 0
+            cutoff = str(settings.get("model_entry_cutoff_et") or "14:00")
+            try:
+                _ch, _cm = (int(x) for x in cutoff.split(":"))
+                past_cutoff = phase == "regular" and (t.hour * 60 + t.minute) >= _ch * 60 + _cm
+            except (ValueError, TypeError):
+                past_cutoff = False
             for sym in symbols:
                 scanned += 1
                 base_sym = sym.split("|")[0]
@@ -1173,6 +1192,14 @@ class Scheduler:
                 if not v or v["action"] != "buy":
                     continue
                 base = sym.split("|")[0]
+                if past_cutoff:
+                    # still evaluated and visible, just not entered late
+                    hb["late_rejects"] = hb.get("late_rejects", 0) + 1
+                    continue
+                # 5-minute ATR rides along so position geometry can be scaled to
+                # the session's volatility rather than to a multi-day stop
+                _m5 = ctx["bars_5m"].get(base) or []
+                v = {**v, "atr_5m": (atr(_m5, 14) if len(_m5) >= 15 else None)}
                 q = (ctx["bars_5m"].get(base) or ctx["bars_daily"].get(base) or [])
                 qp = q[-1]["c"] if q else v["entry"]
                 v = {**v, "evidence": {**(v.get("evidence") or {}),
@@ -1629,6 +1656,25 @@ class Scheduler:
             try:
                 pos_updates = await paper_engine.update_positions(
                     db, quotes, settings)
+                # Attach each open position's bar high/low since entry so
+                # settlement can act on touches between quote ticks. The
+                # models pass keeps these 5-min series warm, so this is
+                # almost always a cache hit.
+                if self.mctx is not None:
+                    for p_ in open_model_pos:
+                        q_ = quotes.get(p_.symbol)
+                        if not q_ or not p_.opened_at:
+                            continue
+                        try:
+                            bars_ = await self.mctx.m5(p_.symbol)
+                        except Exception:
+                            continue
+                        o_ts = p_.opened_at if p_.opened_at.tzinfo else \
+                            p_.opened_at.replace(tzinfo=timezone.utc)
+                        since = [b for b in bars_ if b.get("ts") and b["ts"] > o_ts]
+                        if since:
+                            q_["bar_high_since_entry"] = max(b["h"] for b in since)
+                            q_["bar_low_since_entry"] = min(b["l"] for b in since)
                 pos_updates += await mplat.settle_positions(db, quotes, settings)
                 locked = await mplat.finalize_noon_outcomes(db, quotes)
                 if locked:
@@ -1653,8 +1699,8 @@ class Scheduler:
                         rc.shadow_last = px
                         rc.shadow_high = max(rc.shadow_high or px, px)
                         rc.shadow_low = min(rc.shadow_low or px, px)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("shadow tracking failed: %s: %s", type(e).__name__, e)
             await db.commit()
             if updates:
                 await broadcaster.publish("signals", {"rows": updates,

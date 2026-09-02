@@ -405,6 +405,21 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         # entry > stop. A position must satisfy stop < fill < t1 <= t2 with a
         # real risk distance, or it is not a trade.
         stop_, t1_, t2_ = verdict["stop"], verdict["target1"], verdict["target2"]
+        # Day-trading geometry. Swing/position engines ship stops of 8–18% of
+        # price; flattened at 15:55 those trades can only ever move 0.1–0.3R
+        # in a session — pure noise. And 2% stops on volatile movers sit inside
+        # the bar-to-bar noise. When day trading, every stop is re-derived
+        # from the session's own volatility: 1.5×ATR(5m), clamped to 0.6–4%
+        # of price, and targets re-laid at 1.5R / 3R from the actual fill.
+        day_mode = str(settings.get("day_trading_mode", "on")).lower() != "off"
+        atr5 = verdict.get("atr_5m")
+        if day_mode and atr5:
+            r_vol = min(max(1.5 * atr5, fill * 0.006), fill * 0.04)
+            stop_ = round(fill - r_vol, 4)
+            t1_ = round(fill + 1.5 * r_vol, 4)
+            t2_ = round(fill + 3.0 * r_vol, 4)
+            verdict = {**verdict, "stop": stop_, "target1": t1_, "target2": t2_,
+                       "geometry": "day_atr", "atr_5m": atr5}
         min_risk = fill * MIN_RISK_FRAC
         bad = None
         if stop_ is None or stop_ >= fill - min_risk:
@@ -479,6 +494,14 @@ async def settle_positions(db, quotes: Dict[str, dict],
         if not q or not q.get("price"):
             continue
         px = q["price"]
+        # Highs and lows since entry, from the 5-minute bars, when the caller
+        # supplies them. Settling on the last quote alone missed every touch
+        # that reversed inside a minute: GPRO ran to 1.95 against a 1.26 target
+        # with no partial taken and was later stopped out.
+        hi_since = q.get("bar_high_since_entry")
+        lo_since = q.get("bar_low_since_entry")
+        px_hi = max(px, hi_since) if hi_since else px
+        px_lo = min(px, lo_since) if lo_since else px
         ev = list(pos.events or [])
         holding = next((e.get("holding") for e in ev if e.get("holding")), "swing")
         slip = {"slippage_pct": settings.get("slippage_pct", 0.4)}
@@ -515,16 +538,24 @@ async def settle_positions(db, quotes: Dict[str, dict],
             return fillp * frac * (pos.size_usd / pos.entry_fill)
 
         credited = 0.0
-        if pos.stop and px <= pos.stop:
+        hit_stop = bool(pos.stop and px_lo <= pos.stop)
+        took1 = any(e.get("e") == "target1_partial" for e in ev)
+        hit_t1 = bool(pos.target1 and px_hi >= pos.target1 and not took1)
+        if hit_stop and hit_t1 and hi_since:
+            # both touched inside one settlement window: order unknowable,
+            # resolved as the stop — never as a win
+            ev.append({"t": now_utc().isoformat(), "e": "ambiguous_window",
+                       "detail": "stop and target1 both touched between checks"})
+            credited += close(pos.stop, "stop", pos.remaining_frac)
+        elif hit_stop:
             credited += close(pos.stop, "stop", pos.remaining_frac)
         else:
-            took1 = any(e.get("e") == "target1_partial" for e in ev)
-            if pos.target1 and px >= pos.target1 and not took1:
+            if hit_t1:
                 credited += close(pos.target1, "target1_partial",
                                   0.5 * pos.remaining_frac)
                 pos.stop = pos.entry_fill
                 ev.append({"t": now_utc().isoformat(), "e": "stop_to_breakeven"})
-            if pos.status == "open" and pos.target2 and px >= pos.target2:
+            if pos.status == "open" and pos.target2 and px_hi >= pos.target2:
                 credited += close(pos.target2, "target2", pos.remaining_frac)
             # Day-trading sandbox: every model flattens before the close so
             # each trade resolves the same session and its percentage is locked
@@ -566,6 +597,9 @@ async def settle_positions(db, quotes: Dict[str, dict],
                 mv += pos.size_usd * (mark / pos.entry_fill) * pos.remaining_frac \
                     + pos.size_usd * (1 - pos.remaining_frac) * 0  # closed frac already in cash
         acc.equity = round(acc.cash + mv, 2)
+        # stamp every re-mark; onupdate only fires when a value changes, so an
+        # unchanged equity read as "marked 13786s ago" on the competition page
+        acc.updated_at = now_utc()
         acc.max_equity = max(acc.max_equity, acc.equity)
         if acc.max_equity > 0:
             acc.max_drawdown_pct = min(acc.max_drawdown_pct,
@@ -585,7 +619,8 @@ async def finalize_noon_outcomes(db, quotes: Dict[str, dict]) -> int:
     sigs = (await db.execute(select(BuySignal).where(
         BuySignal.session_date == today,
         BuySignal.is_demo == False,  # noqa: E712
-        BuySignal.profile.in_(("primary", "", None)) if False else
+        # profile scope is applied per-row below (scalper profiles only)
+       
         BuySignal.lifecycle.in_(("ACTIONABLE_BUY", "EARLY_WATCH",
                                  "QUALIFIED_WATCH"))))).scalars().all()
     n = 0

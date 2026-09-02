@@ -7,14 +7,16 @@ import { fmtEtDate } from '../../lib/format';
 export default function FeedPage() {
   const [form, setForm] = useState('');
   const [symbol, setSymbol] = useState('');
+  const [sort, setSort] = useState<'time' | 'symbol' | 'kind'>('time');
+  const [kind, setKind] = useState<'' | 'news' | 'filing'>('');
   const [resp] = usePolling<{ rows: any[]; forms: string[] }>(
-    `/api/feed?form=${form}&symbol=${symbol}`, 60000);
+    `/api/feed?form=${form}&symbol=${symbol}&sort=${sort}&kind=${kind}`, 60000);
   const [sel, setSel] = useState<string | null>(null);
   return (
     <>
       <div className="sect"><h2>News &amp; Filings</h2>
         <span className="meta">unified stream with source timestamps — news publication time, SEC acceptance time</span></div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <input placeholder="Symbol filter…" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())}
           style={{ width: 140, background: 'var(--bg-panel)', border: '1px solid var(--line)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: 'var(--mono)' }} />
         <select value={form} onChange={(e) => setForm(e.target.value)}
@@ -22,6 +24,15 @@ export default function FeedPage() {
           <option value="">All SEC forms</option>
           {(resp?.forms ?? []).map((f) => <option key={f} value={f}>{f}</option>)}
         </select>
+        <span className="meta" style={{ marginLeft: 6 }}>Show</span>
+        {([['', 'All'], ['news', 'News'], ['filing', 'Filings']] as const).map(([k, l]) => (
+          <button key={k} className={`tab ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{l}</button>
+        ))}
+        <span className="meta" style={{ marginLeft: 6 }}>Sort</span>
+        {(['time', 'symbol', 'kind'] as const).map((k) => (
+          <button key={k} className={`tab ${sort === k ? 'on' : ''}`} onClick={() => setSort(k)}>{k}</button>
+        ))}
+        <span className="meta" style={{ marginLeft: 'auto' }}>{(resp?.rows ?? []).length} items</span>
       </div>
       <div className="timeline">
         {(resp?.rows ?? []).map((r, i) => (

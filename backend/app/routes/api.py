@@ -540,8 +540,8 @@ async def health_detail(request: Request, db: AsyncSession = Depends(get_session
                       "count": len(files)}
         else:
             backup = {"status": "NONE", "note": "no backups found yet"}
-    except Exception:
-        pass
+    except Exception as e:
+        backup = {"status": "UNKNOWN", "note": f"backup check failed: {type(e).__name__}"}
     return {
         "env_status": get_config().provider_status(),
         "backup": backup,
@@ -1151,6 +1151,7 @@ async def alerts_delete(alert_id: int, db: AsyncSession = Depends(get_session)):
 
 @router.get("/feed")
 async def feed(form: str = "", symbol: str = "", limit: int = 80,
+               sort: str = "time", kind: str = "",
                db: AsyncSession = Depends(get_session)):
     """Unified news + filings stream with source timestamps."""
     nq = select(NewsItem).order_by(desc(NewsItem.published_at)).limit(min(limit, 200))
@@ -1171,8 +1172,18 @@ async def feed(form: str = "", symbol: str = "", limit: int = 80,
                "source": "SEC EDGAR", "url": f.primary_doc_url,
                "form": f.form_type} for f in filings])
     items = [i for i in items if i["ts"]]
-    items.sort(key=lambda i: i["ts"], reverse=True)
-    return {"rows": items[:limit],
+    if kind in ("news", "filing"):
+        items = [i for i in items if i["kind"] == kind]
+    # ts can be None for a filing without an acceptance time or news without a
+    # publication time; comparing None to str raised and the page showed
+    # whatever order the two queries happened to interleave in.
+    if sort == "symbol":
+        items.sort(key=lambda i: (i.get("symbol") or "~", -(len(i["ts"] or ""))))
+    elif sort == "kind":
+        items.sort(key=lambda i: (i["kind"], i["ts"] or ""), reverse=True)
+    else:
+        items.sort(key=lambda i: i["ts"] or "", reverse=True)
+    return {"rows": items[:limit], "sorted_by": sort,
             "forms": sorted({f.form_type for f in filings})}
 
 

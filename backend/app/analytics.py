@@ -3,6 +3,10 @@ Dashboard headline, detail tables, CSV export, API responses, and reports must
 all call canonical_report() — never hand-rolled counts."""
 from __future__ import annotations
 
+import logging
+
+log = logging.getLogger(__name__)
+
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -41,8 +45,8 @@ def effective_lifecycle(s: BuySignal) -> str:
         from .util.timeutil import ET
         e = init.astimezone(ET)
         et_h = e.hour * 60 + e.minute
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("could not derive ET minute for signal: %s", e)
     if et_h is not None and et_h < 7 * 60:
         return "EARLY_WATCH"
     if et_h is not None and et_h > 9 * 60 + 30:

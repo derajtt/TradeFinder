@@ -117,7 +117,9 @@ class FmpProvider:
                 raise EntitlementError(f"fmp {name} not in plan (HTTP {code})")
             raise
         self._mark_entitlement(name, True, 200)
-        if cache_ttl > 0:
+        # An empty response is not knowledge; caching it for the full TTL
+        # made a transient miss look like "no data" for up to a day.
+        if cache_ttl > 0 and data not in (None, [], {}):
             self._cache[cache_key] = (_time.monotonic(), data)
         return data
 

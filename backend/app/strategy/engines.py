@@ -321,7 +321,7 @@ def orb(ctx, sym, cfg) -> Optional[dict]:
     hi = max(b["h"] for b in orange)
     lo = min(b["l"] for b in orange)
     px = today[-1]["c"]
-    if px <= hi or (hi - lo) / px * 100 > float(cfg.get("max_range_pct", 1.5)):
+    if px <= hi or (hi - lo) / px * 100 > float(cfg.get("max_range_pct", 2.5)):
         return None
     rv = sum(b["v"] for b in today[n_range:][-3:]) / \
         max(1, sum(b["v"] for b in orange) / n_range * 3)
@@ -406,7 +406,7 @@ def vacuum(ctx, sym, cfg) -> Optional[dict]:
         (sma(rng, 5) or 9e9) < 0.7 * (sma(rng, 20) or 1e-9)
     vols = [b["v"] for b in d]
     vz = zscore(vols, 20)
-    if not contracting or vz is None or vz > -0.8:
+    if not contracting or vz is None or vz > -0.5:   # -0.8 fired 0 times in a session
         return None
     hi5 = max(b["h"] for b in d[-6:-1])
     px = m5[-1]["c"]

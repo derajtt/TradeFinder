@@ -11,8 +11,11 @@ export default function SignalsPage() {
   const [profile] = useProfile();
   const [sort, setSort] = useState<'score' | 'change' | 'time' | 'symbol'>('score');
   const [dedupe, setDedupe] = useState(true);
+  // Demo rows were included by default and, sorted by score, floated to the
+  // top of the real signal history. Off unless asked for.
+  const [demo, setDemo] = useState(false);
   const [resp] = usePolling<{ rows: SignalRow[] }>(
-    `/api/signals?include_demo=true&limit=500&profile=${profile}`
+    `/api/signals?include_demo=${demo}&limit=500&profile=${profile}`
     + `&dedupe=${dedupe ? 1 : 0}&sort=${sort}`, 30000);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('active');
@@ -55,6 +58,10 @@ export default function SignalsPage() {
             {k === 'change' ? 'move %' : k}
           </button>
         ))}
+        <button className={`tab ${demo ? 'on' : ''}`} onClick={() => setDemo((d) => !d)}
+          title="Demo/seed rows are synthetic and never count toward any statistic.">
+          {demo ? '✓ demo rows shown' : 'show demo rows'}
+        </button>
         <button className={`tab ${dedupe ? 'on' : ''}`} onClick={() => setDedupe((d) => !d)}
           title="One lifecycle row is stored per profile, per state, per day, so a raw list repeats the same symbol many times. This keeps the newest row for each.">
           {dedupe ? '✓ one row per symbol' : 'show every record'}
