@@ -384,6 +384,11 @@ def compute_market_features(quote: dict, today_pm: List[dict], baselines: List[f
         "rvol_estimated": rvol_estimated,
         "rvol_baseline_median": rv["baseline_median"],
         "volume_acceleration": accel,
+        # Minutes that actually printed volume. The sustained_participation gate
+        # requires 3+, but this was only ever produced by the backtester, so the
+        # live path always fed it None -> the gate had never passed once in 123
+        # evaluations. Same quantity the VWAP guard above already uses.
+        "participation_bars": vol_bars,
         "vwap": vw,
         "above_vwap": (price > vw) if (price is not None and vw is not None) else None,
         "pm_high": struct["pm_high"], "pm_low": struct["pm_low"],

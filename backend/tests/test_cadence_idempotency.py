@@ -91,3 +91,25 @@ def test_client_errors_do_not_trip_the_circuit_breaker():
     for _ in range(5):
         b2.record(False)
     assert b2.allow() is False
+
+
+def test_live_features_supply_every_gate_input():
+    """A gate whose input the live path never produces can never pass. Assert the
+    feature builder exports the fields the v2 gates read."""
+    import inspect
+    from app.scanner import funnel
+    from app.strategy import gates
+
+    feats_src = inspect.getsource(funnel.compute_market_features)
+    gates_src = inspect.getsource(gates.evaluate)
+
+    # every f.get("...") the gate evaluator reads must be produced live
+    import re
+    read = set(re.findall(r'f\.get\("([a-z_]+)"', gates_src))
+    produced = set(re.findall(r'"([a-z_]+)":', feats_src))
+    # fields legitimately supplied by other stages, not the market-feature builder
+    external = {"catalyst_grade", "halted", "float_shares", "shares_outstanding",
+                "market_cap", "reverse_split_recent", "ask_size", "bid_size",
+                "ask", "bid", "sector", "float_rotation", "ext_above_vwap_pct"}
+    missing = read - produced - external
+    assert not missing, f"v2 gates read fields the live path never produces: {sorted(missing)}"
