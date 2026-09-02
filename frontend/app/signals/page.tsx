@@ -9,7 +9,11 @@ import type { SignalRow } from '../../lib/types';
 
 export default function SignalsPage() {
   const [profile] = useProfile();
-  const [resp] = usePolling<{ rows: SignalRow[] }>(`/api/signals?include_demo=true&limit=500&profile=${profile}`, 30000);
+  const [sort, setSort] = useState<'score' | 'change' | 'time' | 'symbol'>('score');
+  const [dedupe, setDedupe] = useState(true);
+  const [resp] = usePolling<{ rows: SignalRow[] }>(
+    `/api/signals?include_demo=true&limit=500&profile=${profile}`
+    + `&dedupe=${dedupe ? 1 : 0}&sort=${sort}`, 30000);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('active');
   const [selected, setSelected] = useState<string | null>(null);
@@ -43,6 +47,19 @@ export default function SignalsPage() {
           <option value="closed">Closed</option>
           <option value="invalidated">Invalidated</option>
         </select>
+      </div>
+      <div className="row" style={{ gap: 7, marginBottom: 10, alignItems: 'center' }}>
+        <span className="meta">Sort</span>
+        {(['score', 'change', 'time', 'symbol'] as const).map((k) => (
+          <button key={k} className={`tab ${sort === k ? 'on' : ''}`} onClick={() => setSort(k)}>
+            {k === 'change' ? 'move %' : k}
+          </button>
+        ))}
+        <button className={`tab ${dedupe ? 'on' : ''}`} onClick={() => setDedupe((d) => !d)}
+          title="One lifecycle row is stored per profile, per state, per day, so a raw list repeats the same symbol many times. This keeps the newest row for each.">
+          {dedupe ? '✓ one row per symbol' : 'show every record'}
+        </button>
+        <span className="meta" style={{ marginLeft: 'auto' }}>{rows.length} rows</span>
       </div>
       <SignalTable rows={rows} onSelect={(s) => setSelected(s.symbol)} />
       {selected && <DetailDrawer symbol={selected} onClose={() => setSelected(null)} />}

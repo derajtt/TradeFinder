@@ -204,8 +204,16 @@ async def candidate_detail(symbol: str, request: Request,
 @router.get("/signals")
 async def signals(active_only: bool = False, include_demo: bool = False,
                   limit: int = 200, profile: str = "",
+                  dedupe: bool = False, sort: str = "time",
+                  session_date: str = "",
                   db: AsyncSession = Depends(get_session)):
-    q = select(BuySignal).order_by(desc(BuySignal.initiated_at)).limit(min(limit, 1000))
+    """`dedupe` collapses to one row per symbol (its most recent state) — the
+    lifecycle table stores a row per profile per state per day, so a raw list
+    shows the same symbol many times over."""
+    q = select(BuySignal).order_by(desc(BuySignal.initiated_at)).limit(
+        min(limit * (4 if dedupe else 1), 1500))
+    if session_date:
+        q = q.where(BuySignal.session_date == session_date)
     if profile:
         q = q.where(_profile_filter(BuySignal.profile, profile))
     if active_only:
@@ -247,7 +255,38 @@ async def signals(active_only: bool = False, include_demo: bool = False,
             "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
             **metrics_with_outcome(s, _settings),
         })
-    return {"rows": out}
+
+    if dedupe:
+        # One row per symbol: the most recent record wins, but keep the best
+        # lifecycle the symbol reached and a count of how many records it has,
+        # so collapsing never hides that a symbol was evaluated repeatedly.
+        RANK = {"ACTIONABLE_BUY": 4, "QUALIFIED_WATCH": 3, "EARLY_WATCH": 2,
+                "DISCOVERED": 1}
+        best: Dict[str, Dict[str, Any]] = {}
+        for r in out:                       # already newest-first
+            sym = r["symbol"]
+            cur = best.get(sym)
+            if cur is None:
+                r = {**r, "record_count": 1,
+                     "best_lifecycle": r.get("lifecycle") or ""}
+                best[sym] = r
+                continue
+            cur["record_count"] += 1
+            if RANK.get(r.get("lifecycle") or "", 0) > \
+               RANK.get(cur.get("best_lifecycle") or "", 0):
+                cur["best_lifecycle"] = r.get("lifecycle") or ""
+            if (r.get("score") or 0) > (cur.get("score") or 0):
+                cur["score"] = r.get("score")
+        out = list(best.values())
+
+    if sort == "score":
+        out.sort(key=lambda r: (r.get("score") is None, -(r.get("score") or 0)))
+    elif sort == "change":
+        out.sort(key=lambda r: (r.get("change_pct") is None,
+                                -(r.get("change_pct") or 0)))
+    elif sort == "symbol":
+        out.sort(key=lambda r: r.get("symbol") or "")
+    return {"rows": out[:limit], "sorted_by": sort, "deduped": dedupe}
 
 
 @router.get("/signals/export.csv")

@@ -17,12 +17,34 @@ interface ModelInfo { id: string; name: string; color: string; edge: string;
 export default function ModelPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const [sort, setSort] = useState<'time' | 'score' | 'change' | 'symbol'>('score');
+  const [dedupe, setDedupe] = useState(true);
   const [resp] = usePolling<{ models: ModelInfo[]; regime: any }>('/api/models', 30000);
-  const [sigResp] = usePolling<{ rows: SignalRow[] }>(`/api/signals?profile=${id}&limit=200`, 30000);
+  // Extreme Reversion records into its own table, not buy_signals — querying
+  // by profile there would always come back empty.
+  const ownTable = id === 'extreme_reversion';
+  const [sigResp] = usePolling<{ rows?: SignalRow[]; signals?: any[] }>(
+    ownTable ? '/api/reversion/signals?limit=200'
+             : `/api/signals?profile=${id}&limit=200&dedupe=${dedupe ? 1 : 0}&sort=${sort}`,
+    30000);
   const [posResp] = usePolling<{ rows: any[] }>(`/api/positions?profile=${id}`, 30000);
   const [tab, setTab] = useState<'overview' | 'signals' | 'positions'>('overview');
   const [sel, setSel] = useState<string | null>(null);
   const m = useMemo(() => resp?.models.find((x) => x.id === id), [resp, id]);
+  // Extreme Reversion stores richer rows in its own table; map them onto the
+  // shared signal shape so one table component serves every finder.
+  const sigRows: SignalRow[] = useMemo(() => {
+    if (!ownTable) return (sigResp?.rows ?? []) as SignalRow[];
+    return (sigResp?.signals ?? []).map((r: any) => ({
+      signal_uid: r.signal_uid, symbol: r.symbol,
+      initiated_at: r.confirmed_at, buy_price: r.entry,
+      current: r.entry, score: r.score, lifecycle: r.status,
+      profile: r.variant, status: r.status,
+      stop: r.stop,
+      target1: (r.targets?.[0] || {}).price,
+      target2: (r.targets?.[1] || {}).price,
+    })) as unknown as SignalRow[];
+  }, [ownTable, sigResp]);
   if (!m) return <div className="skel" style={{ height: 300, marginTop: 20 }} />;
   const a = m.account;
   return (
@@ -62,7 +84,28 @@ export default function ModelPage() {
         ))}
       </div>
 
-      {tab === 'signals' && <SignalTable rows={sigResp?.rows ?? []} onSelect={(s) => setSel(s.symbol)} />}
+      {tab === 'signals' && (
+        <>
+          <div className="row" style={{ gap: 7, marginBottom: 10, alignItems: 'center' }}>
+            <span className="meta">Sort</span>
+            {(['score', 'change', 'time', 'symbol'] as const).map((k) => (
+              <button key={k} className={`tab ${sort === k ? 'on' : ''}`}
+                onClick={() => setSort(k)} disabled={ownTable}>
+                {k === 'change' ? 'move %' : k}
+              </button>
+            ))}
+            <button className={`tab ${dedupe ? 'on' : ''}`} onClick={() => setDedupe((d) => !d)}
+              disabled={ownTable}
+              title="The lifecycle table stores one row per profile per state per day, so the same symbol repeats. This collapses to one row each.">
+              {dedupe ? '✓ one row per symbol' : 'show every record'}
+            </button>
+            <span className="meta" style={{ marginLeft: 'auto' }}>
+              {sigRows.length} rows
+            </span>
+          </div>
+          <SignalTable rows={sigRows} onSelect={(s) => setSel(s.symbol)} />
+        </>
+      )}
       {tab === 'positions' && (
         <div className="tbl-wrap"><table className="tbl" style={{ minWidth: 700 }}>
           <thead><tr><th className="l">Symbol</th><th className="l">Status</th><th>Entry</th>
