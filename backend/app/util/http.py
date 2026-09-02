@@ -40,7 +40,15 @@ class TokenBucket:
 
 
 class CircuitBreaker:
-    def __init__(self, threshold: int = 5, cooldown: float = 60.0):
+    """Opens after `threshold` consecutive provider-health failures.
+
+    Tuned for a scanner on a rate-limited plan: a short burst of 429s during a
+    busy premarket pass should slow us down, not blind every endpoint for a
+    full minute. The token bucket is the primary rate control; this is the
+    backstop for a provider that is genuinely down.
+    """
+
+    def __init__(self, threshold: int = 8, cooldown: float = 20.0):
         self.threshold = threshold
         self.cooldown = cooldown
         self.failures = 0

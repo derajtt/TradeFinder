@@ -72,7 +72,10 @@ class FmpProvider:
         cfg = get_config()
         self.base = cfg.fmp_rest_base.rstrip("/")
         self.key = cfg.fmp_api_key
-        self.http = ProviderClient("fmp", rate_per_sec=4.0, burst=8)
+        self.http = ProviderClient("fmp", rate_per_sec=2.2, burst=4)
+        # 4/s (240/min) drew sustained 429s, and each burst of five tripped
+        # the circuit breaker, blinding every endpoint. 2.2/s (~130/min)
+        # with a smaller burst keeps headroom under the plan limit.
         self._cache: Dict[str, tuple] = {}
         self.entitlements: Dict[str, dict] = {}  # endpoint -> {ok, status, checked_at}
 

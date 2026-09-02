@@ -179,9 +179,9 @@ class Scheduler:
                     # just as valid at 08:00 as at 09:30 — evaluating them here
                     # gives pre-open visibility. Cadence marks still stop a
                     # daily model from rebalancing twice.
-                    if self.state["cycles"] % 4 == 0:
+                    if self.state["cycles"] % 10 == 0:
                         await self._models_cycle(settings, phase)
-                    if self.state["cycles"] % 5 == 0:
+                    if self.state["cycles"] % 15 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "regular":
                     await self._tracking_cycle(settings, finalize=False)
@@ -189,7 +189,7 @@ class Scheduler:
                         await self._discovery_cycle(settings, phase)  # keep candidate table fresh
                     if self.state["cycles"] % 3 == 0:
                         await self._models_cycle(settings, phase)
-                    if self.state["cycles"] % 4 == 0:
+                    if self.state["cycles"] % 12 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
