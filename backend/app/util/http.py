@@ -108,8 +108,14 @@ class ProviderClient:
                     await asyncio.sleep(min(8.0, (2 ** attempt) + random.random()))
                     continue
                 if resp.status_code >= 400:
-                    self._log(name, resp.status_code, latency, 0, False, "client error")
-                    self.breaker.record(False)
+                    # A 4xx is about THIS request — a plan that lacks the
+                    # endpoint (402/403), a bad symbol (404), a bad key (401).
+                    # It says nothing about provider health, so it must not
+                    # count toward the breaker: five 402s from an unentitled
+                    # endpoint would otherwise open the circuit for every
+                    # endpoint that works, blinding the whole platform.
+                    self._log(name, resp.status_code, latency, 0, False,
+                              "client error (not counted toward circuit)")
                     raise RuntimeError(f"{self.name} {name} HTTP {resp.status_code}")
                 data = resp.json()
                 count = len(data) if isinstance(data, list) else 1

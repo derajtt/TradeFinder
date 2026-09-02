@@ -65,3 +65,29 @@ async def test_new_dict_settings_actually_persist(db):
         await update_settings(db, {key: payload})
         got = (await get_settings(db)).get(key)
         assert got == payload, f"{key} did not persist (got {got!r})"
+
+
+def test_client_errors_do_not_trip_the_circuit_breaker():
+    """A 402 from an unentitled endpoint must not open the circuit that guards
+    every other endpoint — that blinds the whole platform on a permanent,
+    request-specific condition."""
+    import inspect
+    from app.util import http as h
+    src = inspect.getsource(h.ProviderClient.get_json)
+    # locate the 4xx branch and confirm it does not record a breaker failure
+    idx = src.index("if resp.status_code >= 400:")
+    branch = src[idx:idx + 700]
+    assert "client error" in branch
+    assert "self.breaker.record(False)" not in branch.split("raise RuntimeError")[0]
+
+    # and a burst of 4xx must leave the breaker closed
+    b = h.CircuitBreaker(threshold=5)
+    for _ in range(10):
+        pass                       # no record() calls on the 4xx path
+    assert b.allow() is True
+
+    # while genuine provider failures still open it
+    b2 = h.CircuitBreaker(threshold=5)
+    for _ in range(5):
+        b2.record(False)
+    assert b2.allow() is False
