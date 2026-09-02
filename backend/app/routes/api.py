@@ -207,9 +207,7 @@ async def signals(active_only: bool = False, include_demo: bool = False,
                   db: AsyncSession = Depends(get_session)):
     q = select(BuySignal).order_by(desc(BuySignal.initiated_at)).limit(min(limit, 1000))
     if profile:
-        q = q.where((BuySignal.profile == profile) |
-                    (BuySignal.profile == "") | (BuySignal.profile.is_(None))
-                    if profile == "primary" else BuySignal.profile == profile)
+        q = q.where(_profile_filter(BuySignal.profile, profile))
     if active_only:
         q = q.where(BuySignal.status == "active")
     if not include_demo:
@@ -584,7 +582,7 @@ async def rejected(limit: int = 100, profile: str = "",
                    db: AsyncSession = Depends(get_session)):
     q = select(RejectedCandidate).order_by(desc(RejectedCandidate.id)).limit(min(limit, 400))
     if profile:
-        q = q.where(RejectedCandidate.profile == profile)
+        q = q.where(_profile_filter(RejectedCandidate.profile, profile))
     rows = (await db.execute(q)).scalars().all()
     return {"rows": [{
         "symbol": r.symbol, "session_date": r.session_date,
@@ -604,7 +602,7 @@ async def rejected(limit: int = 100, profile: str = "",
 async def positions(profile: str = "", db: AsyncSession = Depends(get_session)):
     q = select(PaperPosition).order_by(desc(PaperPosition.id)).limit(200)
     if profile:
-        q = q.where(PaperPosition.profile == profile)
+        q = q.where(_profile_filter(PaperPosition.profile, profile))
     rows = (await db.execute(q)).scalars().all()
     return {"rows": [{
         "symbol": p.symbol, "status": p.status, "profile": p.profile,
@@ -645,6 +643,21 @@ async def backtest_report(db: AsyncSession = Depends(get_session)):
 # The premarket scalper records positions under profile ids ("primary" and the
 # challenger profiles), not under its registry id, so its $10,000 ledger lives
 # under "primary". Alias it rather than showing a permanently untouched card.
+# The premarket scalper writes its signals under profile ids, never under its
+# registry id, so a UI query for profile="premarket_scalper" matched nothing and
+# its page rendered empty while dozens of its signals existed.
+SCALPER_PROFILES = ("primary", "accuracy", "aggressive", "penny", "insight_t45")
+
+
+def _profile_filter(column, profile: str):
+    """Resolve a UI profile selector to the profiles actually written."""
+    if profile == "premarket_scalper":
+        return column.in_(SCALPER_PROFILES)
+    if profile == "primary":
+        return (column == "primary") | (column == "") | (column.is_(None))
+    return column == profile
+
+
 LEDGER_ALIAS = {"premarket_scalper": "primary"}
 
 

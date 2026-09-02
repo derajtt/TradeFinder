@@ -113,3 +113,30 @@ def test_live_features_supply_every_gate_input():
                 "ask", "bid", "sector", "float_rotation", "ext_above_vwap_pct"}
     missing = read - produced - external
     assert not missing, f"v2 gates read fields the live path never produces: {sorted(missing)}"
+
+
+async def test_scalper_page_query_finds_its_signals(db):
+    """The scalper writes profile ids, not its registry id. A UI query for
+    profile='premarket_scalper' must resolve to what it actually writes,
+    otherwise its page renders empty while its signals exist."""
+    from sqlalchemy import select
+    from app.models import BuySignal
+    from app.routes.api import _profile_filter
+    from app.signals import service as svc
+
+    for prof in ("primary", "aggressive"):
+        sig = await svc.create_buy_signal(
+            db, symbol=f"SC{prof[:3].upper()}", session_date="2026-09-02",
+            strategy_version="v1", price=1.0, price_source="t", provider_ts=None,
+            score_snapshot={}, evidence_snapshot={}, signal_type="watch",
+            fingerprint=f"fp-{prof}")
+        sig.profile = prof
+    await db.commit()
+
+    rows = (await db.execute(select(BuySignal).where(
+        _profile_filter(BuySignal.profile, "premarket_scalper")))).scalars().all()
+    assert len(rows) >= 2, "scalper query must match its real profile ids"
+    # and a specific profile still resolves to itself only
+    only = (await db.execute(select(BuySignal).where(
+        _profile_filter(BuySignal.profile, "aggressive")))).scalars().all()
+    assert {r.profile for r in only} == {"aggressive"}
