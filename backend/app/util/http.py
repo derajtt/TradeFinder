@@ -35,8 +35,18 @@ class TokenBucket:
                 if self.tokens >= 1:
                     self.tokens -= 1
                     return
+                # Jitter the refill wait. Without it, every coroutine blocked on
+                # an empty bucket wakes at the same instant and fires together,
+                # which is what produces 429s even when the average rate is
+                # under the limit.
                 wait = (1 - self.tokens) / self.rate
-                await asyncio.sleep(wait)
+                await asyncio.sleep(wait + random.random() * 0.05)
+
+    def drain(self):
+        """Empty the bucket after a 429 so every caller backs off, not just the
+        one that got rate-limited."""
+        self.tokens = 0.0
+        self.updated = _time.monotonic()
 
 
 class CircuitBreaker:
@@ -113,6 +123,18 @@ class ProviderClient:
                 if resp.status_code == 429 or resp.status_code >= 500:
                     self._log(name, resp.status_code, latency, 0, False, "retryable")
                     self.breaker.record(False)
+                    if resp.status_code == 429:
+                        # Actually slow down rather than retrying at the same
+                        # pace: drain the bucket so the next callers wait too,
+                        # and honour Retry-After when the provider sends it.
+                        self.bucket.drain()
+                        ra = resp.headers.get("Retry-After")
+                        if ra:
+                            try:
+                                await asyncio.sleep(min(15.0, float(ra)))
+                                continue
+                            except (TypeError, ValueError):
+                                pass
                     await asyncio.sleep(min(8.0, (2 ** attempt) + random.random()))
                     continue
                 if resp.status_code >= 400:
