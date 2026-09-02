@@ -377,6 +377,27 @@ class Scheduler:
                     run.enriched = enriched
                     run.api_calls = len(ctx.fmp.http.request_log) - api_calls_before
                     await db.commit()
+            # The scalper runs here, not in _models_cycle, so it reports its own
+            # heartbeat — otherwise its health row reads UNKNOWN forever.
+            hb = self.model_health.setdefault("premarket_scalper", {})
+            today_key = str(t_now_et.date())
+            hb.update({
+                "model_id": "premarket_scalper", "name": "Premarket Scalper",
+                "engine": "scalper", "cadence": "premarket", "enabled": True,
+                "status": ("LIVE" if phase in ("prep", "premarket", "regular")
+                           else "WAITING"),
+                "skip_reason": (None if phase in ("prep", "premarket", "regular")
+                                else "discovery runs 03:45–16:00 ET; outside that "
+                                     "window the scalper is idle by design"),
+                "last_scan_at": now_utc().isoformat(),
+                "last_seen_at": now_utc().isoformat(),
+                "symbols_scanned": universe_size,
+                "symbols_with_data": enriched,
+                "errors": 0,
+                "signals_today": (hb.get("signals_today", 0)
+                                  if hb.get("day") == today_key else 0),
+                "day": today_key,
+            })
             await broadcaster.publish("candidates", {"rows": live_rows[:60],
                                                      "radar": ctx.radar_live[:80],
                                                      "phase": phase,
@@ -660,6 +681,13 @@ class Scheduler:
         self._split_cache[sym] = flag
         return flag
 
+    def _note_scalper_signal(self):
+        health = getattr(self, "model_health", None)
+        if health is None:                      # partially-built test doubles
+            return
+        hb = health.setdefault("premarket_scalper", {})
+        hb["signals_today"] = hb.get("signals_today", 0) + 1
+
     async def _maybe_fire_buy(self, sym: str, feats: Dict[str, Any], result: Dict[str, Any],
                               catalyst: Optional[Dict[str, Any]], filings: List[dict],
                               session_date: str):
@@ -689,6 +717,7 @@ class Scheduler:
                 provider_ts=None,
                 score_snapshot=result, evidence_snapshot=evidence)
             if sig:
+                self._note_scalper_signal()
                 await self._health("info", "signals", f"BUY {sym} @ {feats['price']}")
                 await broadcaster.publish("buy_signal", {
                     "symbol": sym, "price": feats["price"],
