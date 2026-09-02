@@ -467,6 +467,36 @@ async def datasets(strategy_id: str, db: AsyncSession = Depends(get_session)):
     }
 
 
+@router.post("/strategies/{strategy_id}/changelog")
+async def add_change_log(strategy_id: str, payload: Dict[str, Any] = Body(...),
+                         db: AsyncSession = Depends(get_session)):
+    """Record a parameter or logic change against a strategy.
+
+    Every material change should leave a trace with its reasoning, so a shift in
+    performance can later be attributed to the change that caused it rather than
+    to noise.
+    """
+    if not payload.get("changes"):
+        raise HTTPException(400, "changes is required")
+    action = payload.get("dataset_action", "continue")
+    if action not in ("continue", "new_dataset"):
+        raise HTTPException(400, "dataset_action must be continue|new_dataset")
+    row = StrategyChangeLog(
+        strategy_id=strategy_id,
+        version=str(payload.get("version") or "")[:16],
+        changes=str(payload["changes"]),
+        reason=str(payload.get("reason") or ""),
+        old_parameters=payload.get("old_parameters") or {},
+        new_parameters=payload.get("new_parameters") or {},
+        dataset_action=action,
+        actor=str(payload.get("actor") or "admin")[:48],
+    )
+    db.add(row)
+    await db.commit()
+    return {"ok": True, "id": row.id, "changed_at": row.changed_at.isoformat(),
+            "dataset_action": action}
+
+
 @router.post("/strategies/{strategy_id}/reset")
 async def reset_dataset(strategy_id: str, payload: Dict[str, Any] = Body(...),
                         db: AsyncSession = Depends(get_session)):
