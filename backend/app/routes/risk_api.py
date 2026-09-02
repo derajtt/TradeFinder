@@ -24,12 +24,32 @@ from ..util.timeutil import now_et, now_utc
 
 router = APIRouter(prefix="/api")
 
-DATA = pathlib.Path(__file__).resolve().parents[3] / "data" / "rev_out"
+def _data_dir() -> pathlib.Path:
+    """Study outputs live at the repo root locally, but the container's build
+    context is backend/, so the same relative path resolves differently there.
+    Check the plausible locations rather than assuming one layout."""
+    import os
+    here = pathlib.Path(__file__).resolve()
+    cands = []
+    if os.environ.get("REV_OUT_DIR"):
+        cands.append(pathlib.Path(os.environ["REV_OUT_DIR"]))
+    cands += [
+        here.parents[3] / "data" / "rev_out",     # local checkout
+        pathlib.Path("/app/data_root/rev_out"),   # mounted repo data in Docker
+        here.parents[2] / "data" / "rev_out",     # backend/data
+    ]
+    for c in cands:
+        if c.is_dir():
+            return c
+    return cands[0]
+
+
+DATA = _data_dir()
 STALE_HEARTBEAT_S = 1800
 
 
 def _load(name: str) -> Optional[dict]:
-    p = DATA / name
+    p = _data_dir() / name
     if not p.exists():
         return None
     try:

@@ -37,6 +37,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./data:/app/data_root:ro
       - apidata:/app/data
       - ./backups:/app/backups:ro
 
