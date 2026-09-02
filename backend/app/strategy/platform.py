@@ -39,6 +39,7 @@ class ModelContext:
         self._earnings: tuple = (0.0, {})
         self._insiders: tuple = (0.0, {})
         self._movers: tuple = (0.0, [])
+        self._fund: Dict[str, tuple] = {}
 
     async def daily(self, sym: str) -> List[dict]:
         hit = self._daily.get(sym)
@@ -290,9 +291,22 @@ class ModelContext:
         return out
 
     async def fundamentals(self, symbols) -> Dict[str, dict]:
-        """Current-value TTM ratios (labeled snapshot; point-in-time not in plan)."""
+        """Current-value TTM ratios (labeled snapshot; point-in-time not in plan).
+
+        Memoised here for 6h per symbol. The provider's own 24h cache is
+        in-memory and dies on restart, so every cold start re-fired one call
+        per symbol at the same moment as every other cold fetch — a stampede
+        that drained the token bucket and tripped the breaker 256 times in
+        five minutes.
+        """
         out = {}
+        now = _time.monotonic()
         for s in symbols:
+            hit = self._fund.get(s)
+            if hit and now - hit[0] < 6 * 3600:
+                if hit[1]:
+                    out[s] = hit[1]
+                continue
             try:
                 data = await self.fmp._get("ratios-ttm", {"symbol": s},
                                            cache_ttl=24 * 3600,
@@ -302,7 +316,11 @@ class ModelContext:
                     out[s] = {"pe": row.get("priceToEarningsRatioTTM")
                               or row.get("peRatioTTM"),
                               "quality": "CURRENT_TTM_SNAPSHOT"}
+                # a miss is memoised briefly too, so a symbol with no ratios
+                # is not re-requested on every pass
+                self._fund[s] = (now, out.get(s))
             except Exception:
+                self._fund[s] = (now - 6 * 3600 + 600, None)   # retry in 10m
                 continue
         return out
 

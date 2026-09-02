@@ -437,3 +437,22 @@ def test_context_fetches_have_no_try_else_that_discards_success():
     assert 'ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)' in block
     # fundamentals must not be nested under the insider except
     assert re.search(r'except Exception as e:\n\s+ctx\["insider_clusters"\] = \{\}\n\s+await self\._health\("warn", "insiders"[^\n]*\n\s+try:\n\s+ctx\["fundamentals"\]', block) is None
+
+
+async def test_fundamentals_are_memoised_and_core_only():
+    """A cold start re-fired one ratios call per symbol alongside every other
+    cold fetch; the stampede tripped the breaker 256 times in five minutes."""
+    import inspect, time
+    from app.strategy import platform as plat
+    from app import scheduler as sched
+    calls = {"n": 0}
+    class FakeFmp:
+        async def _get(self, path, params, cache_ttl=0, endpoint_name=""):
+            calls["n"] += 1
+            return [{"priceToEarningsRatioTTM": 21.5}]
+    ctx = plat.ModelContext(FakeFmp())
+    a = await ctx.fundamentals(["SPY", "QQQ"])
+    b = await ctx.fundamentals(["SPY", "QQQ"])
+    assert a == b and a["SPY"]["pe"] == 21.5 and calls["n"] == 2   # second pass: 0 calls
+    src = inspect.getsource(sched.Scheduler._models_cycle)
+    assert "fundamentals(list(ETF_UNIVERSE))" in src

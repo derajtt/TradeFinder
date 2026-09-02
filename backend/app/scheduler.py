@@ -1044,7 +1044,10 @@ class Scheduler:
             ctx["insider_clusters"] = {}
             await self._health("warn", "insiders", f"{type(e).__name__}: {e}")
         try:
-            ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)
+            # Only the stable core needs TTM ratios: Multi-Factor is a
+            # large-cap factor model. Fetching P/E for 35 rotating movers
+            # every pass was pure API cost with no consumer.
+            ctx["fundamentals"] = await self.mctx.fundamentals(list(ETF_UNIVERSE))
         except Exception as e:
             ctx["fundamentals"] = {}
             await self._health("warn", "fundamentals", f"{type(e).__name__}: {e}")
