@@ -66,7 +66,11 @@ class ModelContext:
 
     async def m5(self, sym: str) -> List[dict]:
         hit = self._m5.get(sym)
-        if hit and _time.monotonic() - hit[0] < 240:
+        # Per-symbol jitter on the TTL. With a flat 240s every symbol in the
+        # universe expired on the same tick and refetched as one burst, which
+        # drew 429s and tripped the circuit breaker each cycle.
+        ttl = 240 + (hash(sym) % 121) - 60          # 180..300s, stable per symbol
+        if hit and _time.monotonic() - hit[0] < ttl:
             return hit[1]
         d = str(now_et().date())
         try:
@@ -198,15 +202,18 @@ class ModelContext:
             fetched = 0
             async with httpx.AsyncClient(timeout=20,
                                          headers={"User-Agent": ua}) as client:
-                # up to 4 docs per issuer; let the doc budget, not a hard
-                # issuer count, decide how far down the list we get
+                # Small filers FIRST. Sorting by count descending filled the
+                # budget with heavy grant-batch filers (16 Form 4s of code A)
+                # while the classic two-insider purchase clusters — exactly
+                # two filings — sorted to the bottom and were cut off. Three
+                # docs per issuer is enough to find two distinct buyers.
                 for sym, rows in sorted(cands.items(),
-                                        key=lambda kv: -len(kv[1]))[
-                                            :max(12, INSIDER_DOC_FETCH_CAP // 4)]:
-                    buyers = 0
+                                        key=lambda kv: len(kv[1]))[
+                                            :max(12, INSIDER_DOC_FETCH_CAP // 3)]:
+                    owners: set = set()
                     officer = False
                     accs = []
-                    for cik, acc in rows[:4]:
+                    for cik, acc in rows[:3]:
                         # 25 fetches across ~100 candidate issuers meant only
                         # a handful were ever verified and no cluster was ever
                         # found. 120 docs once per 6h is ~12s at SEC's 10/s.
@@ -240,10 +247,15 @@ class ModelContext:
                             break
                         if ("<transactionCode>P</transactionCode>" in txt and
                                 _ACQUIRED_RE.search(txt)):
-                            buyers += 1
+                            # a cluster is DISTINCT people buying, not one
+                            # person filing twice
+                            m_ = _OWNER_RE.search(txt)
+                            owners.add((m_.group(1).strip().lower() if m_
+                                        else acc))
                             accs.append(acc)
                             if "officerTitle" in txt or "isOfficer>1" in txt:
                                 officer = True
+                    buyers = len(owners)
                     if buyers >= 2:
                         out[sym] = {"buyers": buyers, "officer": officer,
                                     "accessions": accs,
@@ -283,6 +295,7 @@ INSIDER_DOC_FETCH_CAP = 120
 SEC_FETCH_GAP_S = 0.13
 # Form 4 acquired/disposed flag, matched on the actual tag rather than a bare ">A<"
 _ACQUIRED_RE = re.compile(r"<transactionAcquiredDisposedCode>\s*<value>A</value>")
+_OWNER_RE = re.compile(r"<rptOwnerName>([^<]+)</rptOwnerName>")
 
 
 async def _reject_geometry(db, model_id, symbol, session_date, verdict, fill, why):

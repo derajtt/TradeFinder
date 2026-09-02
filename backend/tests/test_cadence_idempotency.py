@@ -328,3 +328,30 @@ def test_insider_fetches_are_paced_and_retry_on_429():
     assert "await asyncio.sleep(SEC_FETCH_GAP_S)" in src
     assert "r.status_code == 429" in src
     assert 0 < plat.SEC_FETCH_GAP_S <= 0.2        # under SEC's 10 req/s
+
+
+def test_m5_cache_ttl_is_jittered_per_symbol():
+    """A flat TTL expired every symbol on the same tick and the refetch burst
+    drew 429s and tripped the breaker each cycle."""
+    import inspect
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.ModelContext.m5)
+    assert "hash(sym) % 121" in src and "< ttl" in src
+
+
+def test_insider_counts_distinct_owners_small_filers_first():
+    import inspect
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.ModelContext.insider_clusters)
+    assert "key=lambda kv: len(kv[1])" in src          # ascending
+    assert "buyers = len(owners)" in src
+    m = plat._OWNER_RE.search("<rptOwnerName>Bridgford Baron</rptOwnerName>")
+    assert m and m.group(1) == "Bridgford Baron"
+
+
+def test_chart_patterns_detects_intraday_in_session():
+    import inspect
+    from app.strategy import engines
+    src = inspect.getsource(engines.chartpat)
+    assert "src_bars = m5[-150:]" in src
+    assert '"intraday" if len(m5) >= 60 else "swing"' in src

@@ -477,7 +477,15 @@ def chartpat(ctx, sym, cfg) -> Optional[dict]:
     from .charting import detect
     d = _bars(ctx, sym, "daily")
     m5 = _bars(ctx, sym, "5m")
-    src_bars = d[-90:] if len(d) >= 40 else None
+    # Day-trading engine: detect on the 5-minute series when there is enough
+    # of it. Running the detector on DAILY bars with a two-bar freshness
+    # window yields a few hits per symbol per year, so the model reported
+    # 'no setup' all session while scanning 74 symbols. Daily is the fallback
+    # outside the session when 5-min history is thin.
+    if len(m5) >= 60:
+        src_bars = m5[-150:]
+    else:
+        src_bars = d[-90:] if len(d) >= 40 else None
     if not src_bars:
         return None
     det = detect(src_bars)
@@ -497,7 +505,9 @@ def chartpat(ctx, sym, cfg) -> Optional[dict]:
                60 + min(20, len(fresh) * 5), sig["kind"],
                {"detector": sig["reason"], "level": level,
                 "zones": len(det["zones"]),
-                "patterns": [p["type"] for p in det["patterns"]]}, "swing")
+                "timeframe": "5m" if len(m5) >= 60 else "daily",
+                "patterns": [p["type"] for p in det["patterns"]]},
+               "intraday" if len(m5) >= 60 else "swing")
 
 
 ENGINES = {"confluence": confluence, "pairs": pairs, "trend": trend,
