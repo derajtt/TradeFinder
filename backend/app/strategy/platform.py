@@ -134,8 +134,10 @@ class ModelContext:
         return out
 
     async def earnings_today(self) -> Dict[str, dict]:
-        if self._earnings[0] and _time.monotonic() - self._earnings[0] < 3600:
-            return self._earnings[1]
+        if self._earnings[0]:
+            # same rule as insiders: never hold an empty result for the full TTL
+            if _time.monotonic() - self._earnings[0] < (3600 if self._earnings[1] else 600):
+                return self._earnings[1]
         d0 = str((now_et() - timedelta(days=1)).date())
         d1 = str(now_et().date())
         try:
@@ -166,8 +168,15 @@ class ModelContext:
         -> fetch each filing (bounded) and count distinct owners with real
         open-market purchases (transaction code P, acquired). Sales, grants and
         exercises are excluded — a Form 4 is never assumed to be a buy."""
-        if self._insiders[0] and _time.monotonic() - self._insiders[0] < 6 * 3600:
-            return self._insiders[1]
+        # An EMPTY result is not cached for six hours. The worker's first pass
+        # after a restart landed inside EDGAR's cooldown after an earlier 429
+        # storm, cached {} and served it all session while a fresh call found
+        # six real clusters. Empty retries in 15 minutes; a hit holds 6 hours.
+        if self._insiders[0]:
+            age = _time.monotonic() - self._insiders[0]
+            ttl = 6 * 3600 if self._insiders[1] else 900
+            if age < ttl:
+                return self._insiders[1]
         out: Dict[str, dict] = {}
         try:
             import httpx

@@ -355,3 +355,33 @@ def test_chart_patterns_detects_intraday_in_session():
     src = inspect.getsource(engines.chartpat)
     assert "src_bars = m5[-150:]" in src
     assert '"intraday" if len(m5) >= 60 else "swing"' in src
+
+
+async def test_empty_insider_result_is_not_cached_for_six_hours(monkeypatch):
+    """A first pass inside EDGAR's cooldown cached {} for the whole session
+    while a fresh call found six real clusters."""
+    import time
+    from app.strategy import platform as plat
+    ctx = plat.ModelContext(fmp=None)
+    calls = {"n": 0}
+    async def fake_fetch():
+        calls["n"] += 1
+        return {} if calls["n"] == 1 else {"BRID": {"buyers": 2}}
+    # drive the cache logic with a stand-in for the network stage
+    async def clusters():
+        if ctx._insiders[0]:
+            age = time.monotonic() - ctx._insiders[0]
+            ttl = 6 * 3600 if ctx._insiders[1] else 900
+            if age < ttl:
+                return ctx._insiders[1]
+        out = await fake_fetch()
+        ctx._insiders = (time.monotonic(), out)
+        return out
+    assert await clusters() == {}                      # first pass: empty
+    ctx._insiders = (time.monotonic() - 1000, {})      # 16 minutes later
+    assert await clusters() == {"BRID": {"buyers": 2}} # retried, not stuck
+    ctx._insiders = (time.monotonic() - 1000, {"BRID": {"buyers": 2}})
+    assert await clusters() == {"BRID": {"buyers": 2}} and calls["n"] == 2  # hit held
+    import inspect
+    src = inspect.getsource(plat.ModelContext.insider_clusters)
+    assert "ttl = 6 * 3600 if self._insiders[1] else 900" in src
