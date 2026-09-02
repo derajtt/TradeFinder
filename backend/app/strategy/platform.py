@@ -327,8 +327,24 @@ async def settle_positions(db, quotes: Dict[str, dict],
                 ev.append({"t": now_utc().isoformat(), "e": "stop_to_breakeven"})
             if pos.status == "open" and pos.target2 and px >= pos.target2:
                 credited += close(pos.target2, "target2", pos.remaining_frac)
-            if pos.status == "open" and holding == "intraday" and m_now >= 955:
+            # Day-trading sandbox: every model flattens before the close so
+            # each trade resolves the same session and its percentage is locked
+            # in. Previously only positions tagged "intraday" had a time exit,
+            # so swing and position holdings stayed open indefinitely and their
+            # results never landed — the competition had nothing to rank.
+            day_mode = str(settings.get("day_trading_mode", "on")).lower() != "off"
+            eod = day_mode or holding == "intraday"
+            if pos.status == "open" and eod and m_now >= 955:
                 credited += close(px, "eod_time_exit", pos.remaining_frac)
+            # Crypto trades through the equity close, so it needs its own daily
+            # boundary or those positions would never resolve.
+            if pos.status == "open" and day_mode and pos.symbol.endswith("USD"):
+                opened = pos.opened_at
+                if opened is not None:
+                    if opened.tzinfo is None:
+                        opened = opened.replace(tzinfo=timezone.utc)
+                    if (now_utc() - opened).total_seconds() >= 24 * 3600:
+                        credited += close(px, "24h_time_exit", pos.remaining_frac)
         if credited or pos.status == "closed":
             acc = await get_account(db, pos.profile)
             acc.cash = round(acc.cash + credited, 2)

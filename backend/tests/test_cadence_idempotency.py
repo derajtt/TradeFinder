@@ -175,3 +175,18 @@ def test_long_cadence_models_still_evaluate_between_rebalances():
     assert 'hb["rebalance_pass"]' in src
     # context must not be gated behind the rebalance pass either
     assert 'ctx["earnings"] = await self.mctx.earnings_today()' in src
+
+
+def test_day_trading_mode_flattens_every_model_daily():
+    """The point of the sandbox is ranking algorithms on closed results. Only
+    'intraday' holdings had a time exit, so swing and position trades never
+    resolved and contributed nothing to the comparison."""
+    import inspect
+    from app.strategy import platform as plat
+    from app.scoring.engine import DEFAULT_SETTINGS
+
+    assert DEFAULT_SETTINGS.get("day_trading_mode") == "on"
+    src = inspect.getsource(plat.settle_positions)
+    assert 'day_trading_mode' in src
+    assert 'eod = day_mode or holding == "intraday"' in src
+    assert '24h_time_exit' in src, "crypto needs its own daily boundary"
