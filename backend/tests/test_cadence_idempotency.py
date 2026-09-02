@@ -158,3 +158,20 @@ def test_regime_gating_is_advisory_by_default():
     # and every signal must carry the regime context for later analysis
     assert '"regime_favoured": regime_favours' in src
     assert '"regime_state": reg_state' in src
+
+
+def test_long_cadence_models_still_evaluate_between_rebalances():
+    """A monthly model frozen between rebalances produces ~12 data points a
+    year, which cannot rank anything. They evaluate every pass now; duplication
+    is prevented by the per-day fingerprint and the already-held check, not by
+    freezing the model."""
+    import inspect
+    from app import scheduler as sched
+    src = inspect.getsource(sched.Scheduler._models_cycle)
+    for phrase in ('rebalance already ran for this trading day',
+                   'weekly rebalance already ran',
+                   'monthly rebalance already ran'):
+        assert phrase not in src, f"long-cadence skip still present: {phrase}"
+    assert 'hb["rebalance_pass"]' in src
+    # context must not be gated behind the rebalance pass either
+    assert 'ctx["earnings"] = await self.mctx.earnings_today()' in src

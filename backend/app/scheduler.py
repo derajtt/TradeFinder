@@ -1022,13 +1022,16 @@ class Scheduler:
         live_syms = (stock_syms if intraday_ok else []) + crypto_syms
         for s in live_syms:
             ctx["bars_5m"][s] = await self.mctx.m5(s)
-        ctx["earnings"] = await self.mctx.earnings_today() if run_daily else {}
-        if run_daily:
-            try:
-                ctx["insider_clusters"] = await self.mctx.insider_clusters()
-            except Exception as e:
-                ctx["insider_clusters"] = {}
-                await self._health("warn", "insiders", f"{type(e).__name__}: {e}")
+        # Both are TTL-cached inside ModelContext (earnings 1h, insiders 6h), so
+        # asking every pass costs one real fetch per period. Gating them behind
+        # run_daily starved earnings_drift and insider_cluster of a universe on
+        # every cycle except the single daily rebalance pass.
+        ctx["earnings"] = await self.mctx.earnings_today()
+        try:
+            ctx["insider_clusters"] = await self.mctx.insider_clusters()
+        except Exception as e:
+            ctx["insider_clusters"] = {}
+            await self._health("warn", "insiders", f"{type(e).__name__}: {e}")
             try:
                 ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)
             except Exception:
@@ -1095,18 +1098,19 @@ class Scheduler:
             def _waiting(why):
                 hb.update({"status": "WAITING", "skip_reason": why,
                            "last_seen_at": now_utc().isoformat()})
-            if cadence == "daily" and not run_daily:
-                _waiting("daily rebalance already ran for this trading day")
-                continue
-            if cadence == "weekly" and not run_weekly:
-                _waiting(f"weekly rebalance already ran for {week_key}")
-                continue
-            if cadence == "monthly" and not run_monthly:
-                _waiting(f"monthly rebalance already ran for {month_key}")
-                continue
             if cadence == "premarket":
                 _waiting("premarket cadence is owned by the scalper discovery cycle")
                 continue
+            # Longer-cadence models used to skip entirely between rebalances, so
+            # a monthly model was frozen for a month and produced roughly twelve
+            # data points a year — far too few to rank anything. They now
+            # evaluate every pass and may take a genuinely new position; the
+            # per-day fingerprint and the "never buy what you already hold"
+            # check keep that from becoming churn or duplication.
+            if cadence in ("daily", "weekly", "monthly"):
+                fresh = {"daily": run_daily, "weekly": run_weekly,
+                         "monthly": run_monthly}[cadence]
+                hb["rebalance_pass"] = bool(fresh)
             cfg = (pcfg.get("overrides") or {})
             if meta["engine"] == "pairs":
                 symbols = [f"{a}|{b}" for a, b in PAIRS]
