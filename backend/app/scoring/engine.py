@@ -31,6 +31,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # Day-trading sandbox: every model flattens daily so each trade resolves in
     # the same session and the competition ranks on closed results.
     "day_trading_mode": "on",
+    # How many of the day's most-active / biggest-gainer names join the
+    # intraday model universe alongside the core ETFs and large caps.
+    "movers_cap": 50,
     "min_catalyst_confidence": 0.6,
     "max_extension_from_pm_high_pct": 25.0,
     "quote_freshness_sec": 120,

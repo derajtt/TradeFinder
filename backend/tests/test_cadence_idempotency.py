@@ -258,3 +258,26 @@ def test_insider_engine_looks_back_to_a_published_index():
     from app.strategy import platform as plat
     src = inspect.getsource(plat.ModelContext.insider_clusters)
     assert "for _back in range(7)" in src and "form4_index" in src
+
+
+async def test_intraday_universe_includes_the_days_movers():
+    """A fixed list of 26 calm large caps produced 'no setup' all session for
+    every pattern/breakout engine. The universe must include real movers."""
+    from app.strategy import platform as plat
+
+    class FakeFmp:
+        async def _get(self, path, params, cache_ttl=0, endpoint_name=""):
+            if path == "most-actives":
+                return [{"symbol": "LHAI", "price": 3.2}, {"symbol": "FAMI", "price": 0.4},
+                        {"symbol": "BTCUSD", "price": 70000}, {"symbol": "BRK.B", "price": 400},
+                        {"symbol": "GPUS", "price": 5.1}]
+            if path == "biggest-gainers":
+                return [{"symbol": "GPUS", "price": 5.1}, {"symbol": "VIOT", "price": 2.2}]
+            return []
+
+    ctx = plat.ModelContext(FakeFmp())
+    m = await ctx.movers(cap=50)
+    assert m == ["LHAI", "GPUS", "VIOT"]      # sub-$1, crypto, dotted, dup all excluded
+    assert await ctx.movers(cap=50) == m      # cached
+    cap = plat.ModelContext(FakeFmp())
+    assert len(await cap.movers(cap=2)) == 2

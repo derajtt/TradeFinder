@@ -36,6 +36,7 @@ class ModelContext:
         self._m5: Dict[str, tuple] = {}
         self._earnings: tuple = (0.0, {})
         self._insiders: tuple = (0.0, {})
+        self._movers: tuple = (0.0, [])
 
     async def daily(self, sym: str) -> List[dict]:
         hit = self._daily.get(sym)
@@ -86,6 +87,45 @@ class ModelContext:
         bars.sort(key=lambda b: b["minute_of_day"])
         self._m5[sym] = (_time.monotonic(), bars)
         return bars
+
+    async def movers(self, cap: int = 50) -> List[str]:
+        """Today's actual movers: most-actives plus biggest-gainers.
+
+        The intraday engines were scanning a fixed list of 26 calm large caps
+        and ETFs, where a breakout or pattern setup on a 1%-range day is
+        genuinely rare, so they reported 'no setup' all session. A day-trading
+        fleet has to look where the day's movement is. Cached 10 minutes;
+        two calls per refresh.
+        """
+        if self._movers[0] and _time.monotonic() - self._movers[0] < 600:
+            return self._movers[1]
+        seen, out = set(), []
+        for path in ("most-actives", "biggest-gainers"):
+            try:
+                rows = await self.fmp._get(path, {}, cache_ttl=300,
+                                           endpoint_name=path)
+            except Exception:
+                rows = []
+            for r in (rows if isinstance(rows, list) else []):
+                sym = str(r.get("symbol") or "").upper()
+                px = r.get("price")
+                try:
+                    px = float(px) if px is not None else None
+                except (TypeError, ValueError):
+                    px = None
+                # tradeable, US-listed, not a crypto pair, not a warrant/unit
+                if (not sym or sym in seen or sym.endswith("USD")
+                        or "." in sym or "-" in sym or len(sym) > 5
+                        or (px is not None and px < 1.0)):
+                    continue
+                seen.add(sym)
+                out.append(sym)
+                if len(out) >= cap:
+                    break
+            if len(out) >= cap:
+                break
+        self._movers = (_time.monotonic(), out)
+        return out
 
     async def earnings_today(self) -> Dict[str, dict]:
         if self._earnings[0] and _time.monotonic() - self._earnings[0] < 3600:
@@ -162,7 +202,10 @@ class ModelContext:
                     officer = False
                     accs = []
                     for cik, acc in rows[:4]:
-                        if fetched >= 25:
+                        # 25 fetches across ~100 candidate issuers meant only
+                        # a handful were ever verified and no cluster was ever
+                        # found. 120 docs once per 6h is ~12s at SEC's 10/s.
+                        if fetched >= INSIDER_DOC_FETCH_CAP:
                             break
                         fetched += 1
                         nod = acc.replace("-", "")
@@ -212,6 +255,7 @@ class ModelContext:
 log = logging.getLogger(__name__)
 
 MIN_RISK_FRAC = 0.0015
+INSIDER_DOC_FETCH_CAP = 120
 
 
 async def _reject_geometry(db, model_id, symbol, session_date, verdict, fill, why):

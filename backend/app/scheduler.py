@@ -1002,8 +1002,13 @@ class Scheduler:
         run_monthly = run_daily and marks.get("monthly") != month_key
         # shared context
         ctx: Dict[str, Any] = {"bars_daily": {}, "bars_5m": {}}
-        stock_syms = list(ETF_UNIVERSE)
+        # Core ETFs/large caps plus the day's real movers. The fixed 26-name
+        # list is where liquidity is, but not where intraday setups are.
+        movers = await self.mctx.movers(cap=int(settings.get("movers_cap") or 50))
+        stock_syms = list(dict.fromkeys(list(ETF_UNIVERSE) + movers))
         crypto_syms = list(CRYPTO_UNIVERSE)
+        hb_universe = {"core": len(ETF_UNIVERSE), "movers": len(movers),
+                       "total": len(stock_syms)}
         # Both legs of every pair need daily bars. GLD and XOP are not in
         # ETF_UNIVERSE, so ("GDX","GLD") and ("XLE","XOP") could never resolve
         # and two of the five pairs were permanently dead.
@@ -1178,6 +1183,7 @@ class Scheduler:
                 "signals_today": hb.get("signals_today", 0) + model_fired
                                  if hb.get("day") == today else model_fired,
                 "day": today, "cadence": cadence,
+                "universe": hb_universe,
             })
         if run_daily or run_weekly or run_monthly:
             await self._set_cadence_marks(
