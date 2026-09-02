@@ -385,3 +385,12 @@ async def test_empty_insider_result_is_not_cached_for_six_hours(monkeypatch):
     import inspect
     src = inspect.getsource(plat.ModelContext.insider_clusters)
     assert "ttl = 6 * 3600 if self._insiders[1] else 900" in src
+
+
+def test_insider_pass_logs_stage_counts():
+    import inspect
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.ModelContext.insider_clusters)
+    assert 'log.info("insider_clusters stages:' in src
+    for k in ("index_day", "candidates", "fetched", "p_matches"):
+        assert f'"{k}"' in src

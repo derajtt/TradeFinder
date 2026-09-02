@@ -207,6 +207,9 @@ class ModelContext:
                                 (row["cik"], row["accession"]))
                 d -= timedelta(days=1)
             cands = {s: rows for s, rows in counts.items() if len(rows) >= 2}
+            _stage = {"index_day": str(d), "index_rows": sum(len(v) for v in counts.values()),
+                      "mapped_issuers": len(counts), "candidates": len(cands),
+                      "fetched": 0, "p_matches": 0}
             ua = get_config().sec_user_agent
             fetched = 0
             async with httpx.AsyncClient(timeout=20,
@@ -254,8 +257,10 @@ class ModelContext:
                                 await asyncio.sleep(3.0 * (_try + 1))
                                 continue
                             break
+                        _stage["fetched"] += 1
                         if ("<transactionCode>P</transactionCode>" in txt and
                                 _ACQUIRED_RE.search(txt)):
+                            _stage["p_matches"] += 1
                             # a cluster is DISTINCT people buying, not one
                             # person filing twice
                             m_ = _OWNER_RE.search(txt)
@@ -270,6 +275,10 @@ class ModelContext:
                                     "accessions": accs,
                                     "verified": "transaction_code_P"}
             await data.close()
+            # One line per pass with every stage count, so an empty result can
+            # be attributed to a stage instead of guessed at.
+            log.info("insider_clusters stages: %s clusters=%d head=%s",
+                     _stage, len(out), list(out)[:6])
         except Exception as e:
             # never silent: a broken pipeline must show up in the health log
             log.warning("insider_clusters failed: %s: %s", type(e).__name__, e)

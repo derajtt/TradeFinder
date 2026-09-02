@@ -9,6 +9,7 @@ Discovery failures never touch existing signals; tracking and discovery fail ind
 from __future__ import annotations
 
 import asyncio
+import time as _time
 import json
 import logging
 import traceback
@@ -1123,9 +1124,17 @@ class Scheduler:
                 # Form-4 purchase clusters are market-wide. Feeding this engine
                 # the 20-symbol ETF universe meant the intersection was almost
                 # always empty and the model could never fire.
-                symbols = await self._load_daily_for(
-                    ctx, [x for x in (ctx.get("insider_clusters") or {})
-                          if x not in crypto_syms], cap=25)
+                clusters = [x for x in (ctx.get("insider_clusters") or {})
+                            if x not in crypto_syms]
+                symbols = await self._load_daily_for(ctx, clusters, cap=25)
+                # Say WHICH stage emptied the universe. "no symbols matched"
+                # hid a six-hour cached {} for most of a session.
+                if not symbols:
+                    age = _time.monotonic() - (self.mctx._insiders[0] or _time.monotonic())
+                    hb["skip_reason"] = (
+                        f"cluster fetch returned 0 (result {age/60:.0f}m old; "
+                        f"empty results retry after 15m)" if not clusters else
+                        f"{len(clusters)} cluster(s) found but none had daily bars")
             elif meta["engine"] == "earnings":
                 # Same problem: only companies that actually reported can drift.
                 symbols = await self._load_daily_for(
