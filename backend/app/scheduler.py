@@ -98,10 +98,20 @@ class Scheduler:
             client.request_log = []
         if not rows:
             return
+        # Persist every row. The old rows[-200:] silently discarded anything
+        # beyond 200 per flush, which capped the observed call rate at exactly
+        # 200/min and hid real load.
         async with SessionLocal() as db:
-            for r in rows[-200:]:
+            for r in rows:
                 db.add(ProviderRequest(**r))
             await db.commit()
+        dropped = sum(getattr(c, "dropped_log_rows", 0)
+                      for c in (self.ctx.fmp.http, self.ctx.sec.http))
+        if dropped:
+            await self._health("warn", "provider-log",
+                               f"{dropped} request log row(s) dropped before flush")
+            for c in (self.ctx.fmp.http, self.ctx.sec.http):
+                c.dropped_log_rows = 0
 
     async def _health(self, level: str, component: str, message: str):
         try:

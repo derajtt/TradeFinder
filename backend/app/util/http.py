@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from datetime import datetime, timezone
 import re
 import time as _time
 from typing import Any, Dict, Optional
@@ -94,18 +95,25 @@ class ProviderClient:
         self.client = httpx.AsyncClient(timeout=timeout, headers=headers or {},
                                         follow_redirects=True)
         self.request_log = []  # in-memory ring; flushed to DB by scheduler
+        self.dropped_log_rows = 0
 
     async def close(self):
         await self.client.aclose()
 
     def _log(self, endpoint: str, status: int, latency_ms: int, count: int, ok: bool, note: str = ""):
+        # Stamp the moment the call happened. These rows are flushed to the DB
+        # in batches, and letting the column default to insert time made every
+        # row in a batch share the flush timestamp — so a "calls in the last 5
+        # minutes" rate read zero between flushes and spiked at each one.
         self.request_log.append({
             "provider": self.name, "endpoint": redact(endpoint)[:128],
             "status_code": status, "latency_ms": latency_ms,
             "record_count": count, "ok": ok, "note": redact(note)[:250],
+            "ts_utc": datetime.now(timezone.utc),
         })
-        if len(self.request_log) > 500:
-            del self.request_log[:250]
+        if len(self.request_log) > 2000:
+            self.dropped_log_rows += len(self.request_log) - 1000
+            del self.request_log[:1000]
 
     async def get_json(self, url: str, params: Optional[Dict[str, Any]] = None,
                        endpoint_name: str = "", retries: int = 3) -> Any:
