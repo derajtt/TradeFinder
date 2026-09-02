@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from ..db import SessionLocal
 import logging
+import re
 
 from ..models import (BuySignal, LockedOutcome, PaperAccount, PaperPosition,
                       RejectedCandidate,
@@ -196,8 +197,11 @@ class ModelContext:
             fetched = 0
             async with httpx.AsyncClient(timeout=20,
                                          headers={"User-Agent": ua}) as client:
+                # up to 4 docs per issuer; let the doc budget, not a hard
+                # issuer count, decide how far down the list we get
                 for sym, rows in sorted(cands.items(),
-                                        key=lambda kv: -len(kv[1]))[:12]:
+                                        key=lambda kv: -len(kv[1]))[
+                                            :max(12, INSIDER_DOC_FETCH_CAP // 4)]:
                     buyers = 0
                     officer = False
                     accs = []
@@ -209,15 +213,20 @@ class ModelContext:
                             break
                         fetched += 1
                         nod = acc.replace("-", "")
+                        # The complete submission lives INSIDE the accession
+                        # folder: /data/{cik}/{nod}/{acc}.txt. The previous URL
+                        # omitted the folder, 404'd on every filing, and the
+                        # bare `except: pass` below hid it — so a model with
+                        # real purchase clusters in its data never once fired.
                         url = (f"https://www.sec.gov/Archives/edgar/data/"
-                               f"{int(cik)}/{nod}.txt")
+                               f"{int(cik)}/{nod}/{acc}.txt")
                         try:
                             r = await client.get(url)
                             txt = r.text[:200000] if r.status_code == 200 else ""
                         except httpx.HTTPError:
                             txt = ""
                         if ("<transactionCode>P</transactionCode>" in txt and
-                                ">A<" in txt):
+                                _ACQUIRED_RE.search(txt)):
                             buyers += 1
                             accs.append(acc)
                             if "officerTitle" in txt or "isOfficer>1" in txt:
@@ -227,8 +236,9 @@ class ModelContext:
                                     "accessions": accs,
                                     "verified": "transaction_code_P"}
             await data.close()
-        except Exception:
-            pass
+        except Exception as e:
+            # never silent: a broken pipeline must show up in the health log
+            log.warning("insider_clusters failed: %s: %s", type(e).__name__, e)
         self._insiders = (_time.monotonic(), out)
         return out
 
@@ -256,6 +266,8 @@ log = logging.getLogger(__name__)
 
 MIN_RISK_FRAC = 0.0015
 INSIDER_DOC_FETCH_CAP = 120
+# Form 4 acquired/disposed flag, matched on the actual tag rather than a bare ">A<"
+_ACQUIRED_RE = re.compile(r"<transactionAcquiredDisposedCode>\s*<value>A</value>")
 
 
 async def _reject_geometry(db, model_id, symbol, session_date, verdict, fill, why):

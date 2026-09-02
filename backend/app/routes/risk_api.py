@@ -359,6 +359,7 @@ async def strategy_health(request: Request,
             "signals_today": hb.get("signals_today", 0),
             "errors": hb.get("errors", 0),
             "skip_reason": hb.get("skip_reason"),
+            "universe": hb.get("universe"),
             "equity": acc.equity if acc else None,
             "trades_closed": acc.trades_closed if acc else 0,
         })

@@ -29,9 +29,17 @@ def _mk(action, entry, stop, t1, score, setup, evidence, holding, t2=None):
     if entry is None or stop is None or entry <= stop:
         return None
     risk = entry - stop
+    t1v = t1 if t1 else entry + 1.5 * risk
+    # A defaulted t2 must never sit below an explicit t1. RS Reclaim passed a
+    # t1 of px*(1+rs5) with a stop only 0.5% under VWAP, so entry + 3*risk was
+    # a smaller move than t1 and the geometry check rejected every signal.
+    # The default is the larger of the 3R rung and one extra t1-leg beyond t1.
+    t2v = t2 if t2 else max(entry + 3 * risk, t1v + (t1v - entry))
+    if t2v < t1v:
+        t2v = t1v
     return {"action": action, "entry": round(entry, 4), "stop": round(stop, 4),
-            "target1": round(t1 if t1 else entry + 1.5 * risk, 4),
-            "target2": round(t2 if t2 else entry + 3 * risk, 4),
+            "target1": round(t1v, 4),
+            "target2": round(t2v, 4),
             "score": round(max(0, min(100, score)), 1), "setup": setup,
             "evidence": evidence, "holding": holding}
 

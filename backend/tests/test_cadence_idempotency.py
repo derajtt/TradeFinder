@@ -281,3 +281,29 @@ async def test_intraday_universe_includes_the_days_movers():
     assert await ctx.movers(cap=50) == m      # cached
     cap = plat.ModelContext(FakeFmp())
     assert len(await cap.movers(cap=2)) == 2
+
+
+def test_mk_never_defaults_target2_below_target1():
+    """RS Reclaim supplied a large t1 and a tiny stop; the defaulted t2 of
+    entry + 3*risk landed below t1 and every signal failed the geometry check."""
+    from app.strategy.engines import _mk
+    v = _mk("buy", 100.0, 99.5, 102.0, 60, "t", {}, "intraday")   # risk 0.5, t1 +2%
+    assert v["target2"] >= v["target1"] >= v["entry"] > v["stop"]
+    assert v["target2"] == 104.0                                     # t1 + one t1-leg
+    v2 = _mk("buy", 100.0, 98.0, None, 60, "t", {}, "intraday")     # both defaulted
+    assert v2["target1"] == 103.0 and v2["target2"] == 106.0
+    v3 = _mk("buy", 100.0, 99.0, 101.0, 60, "t", {}, "intraday", t2=100.5)  # explicit bad t2
+    assert v3["target2"] >= v3["target1"]
+
+
+def test_insider_fetches_the_submission_inside_the_accession_folder():
+    """The URL omitted the accession folder, every fetch 404'd, and a bare
+    except hid it — so a model with real purchase clusters never fired."""
+    import inspect, re
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.ModelContext.insider_clusters)
+    assert '{int(cik)}/{nod}/{acc}.txt' in src
+    assert 'except Exception:\n            pass' not in src
+    assert plat._ACQUIRED_RE.search(
+        "<transactionAcquiredDisposedCode>\n  <value>A</value>") is not None
+    assert plat._ACQUIRED_RE.search("<value>D</value>") is None
