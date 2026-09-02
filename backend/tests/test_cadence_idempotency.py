@@ -51,3 +51,17 @@ async def test_duplicate_position_blocked(db, monkeypatch):
     n = len((await db.execute(select(PaperPosition).where(
         PaperPosition.symbol == "DUPE"))).scalars().all())
     assert n == 1
+
+
+async def test_new_dict_settings_actually_persist(db):
+    """update_settings drops unregistered keys silently — a 200 response is not
+    evidence that a setting saved."""
+    from app.settings_service import get_settings, update_settings
+    for key, payload in [
+        ("risk_settings", {"account_equity": 25000.0, "default_risk_pct": 0.5}),
+        ("model_settings", {"extreme_reversion": {"variant": "studied"}}),
+        ("model_cadence_runs", {"daily": "2026-09-02", "monthly": "2026-09"}),
+    ]:
+        await update_settings(db, {key: payload})
+        got = (await get_settings(db)).get(key)
+        assert got == payload, f"{key} did not persist (got {got!r})"

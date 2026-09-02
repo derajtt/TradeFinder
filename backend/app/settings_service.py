@@ -11,7 +11,12 @@ from .scoring.engine import DEFAULT_SETTINGS, NULLABLE_KEYS, STRATEGY_VERSION
 
 
 STRING_KEYS = {"buy_confirm_after_et"}
-DICT_KEYS = {"profiles"}
+# Keys stored as opaque dicts. update_settings silently drops anything not
+# listed here or in DEFAULT_SETTINGS, so a new settings key that is not
+# registered appears to save (the endpoint returns 200) and is then gone on the
+# next read.
+DICT_KEYS = {"profiles", "risk_settings", "model_settings",
+             "model_cadence_runs"}
 
 
 def _coerce(key: str, value):
