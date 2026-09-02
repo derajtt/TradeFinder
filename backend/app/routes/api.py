@@ -751,10 +751,14 @@ async def models_list(request: Request, db: AsyncSession = Depends(get_session))
 
 
 @router.get("/competition")
-async def competition(db: AsyncSession = Depends(get_session)):
+async def competition(request: Request, db: AsyncSession = Depends(get_session)):
     """The $10,000 leaderboards. Cohort: live forward paper only."""
     accs = {a.model_id: a for a in
             (await db.execute(select(PaperAccount))).scalars().all()}
+    # A model sitting at exactly $10,000 has not traded. Without the reason
+    # attached, an untouched card is indistinguishable from a broken one.
+    sched = app_state(request).get("scheduler")
+    health = dict(getattr(sched, "model_health", {}) or {})
     cards = []
     for mid, meta in MODELS.items():
         a = _acct_for(accs, mid)
@@ -772,7 +776,13 @@ async def competition(db: AsyncSession = Depends(get_session)):
                       "max_drawdown_pct": a.max_drawdown_pct if a else 0.0,
                       "trades": a.trades_closed if a else 0,
                       "wins": a.wins if a else 0,
-                      "win_rate": round(wr, 3) if wr is not None else None})
+                      "win_rate": round(wr, 3) if wr is not None else None,
+                      "status": (health.get(mid) or {}).get("status") or "UNKNOWN",
+                      "idle_reason": (health.get(mid) or {}).get("skip_reason"),
+                      "last_scan_at": (health.get(mid) or {}).get("last_scan_at"),
+                      "symbols_scanned": (health.get(mid) or {}).get("symbols_scanned", 0),
+                      "has_traded": bool(a and (a.trades_closed or
+                                                abs(a.equity - a.starting_cash) > 0.005))})
     boards = {}
     with_trades = [c for c in cards if c["trades"] >= 1]
     boards["net_return"] = sorted(cards, key=lambda c: c["return_pct"],

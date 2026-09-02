@@ -6,7 +6,14 @@ import { fmtNum, fmtPrice } from '../../lib/format';
 interface Card { model_id: string; name: string; color: string; experimental: boolean;
   season: number; equity: number; cash: number; return_pct: number; realized_pnl: number;
   max_drawdown_pct: number; trades: number; wins: number; win_rate: number | null;
-  spark?: number[]; }
+  spark?: number[]; status?: string; idle_reason?: string | null;
+  symbols_scanned?: number; has_traded?: boolean; }
+
+const ST: Record<string, string> = {
+  'LIVE': 'st-live', 'PAPER LIVE': 'st-paper', 'WAITING': 'st-waiting',
+  'NO_DATA': 'st-nodata', 'OFFLINE': 'st-offline', 'ERROR': 'st-error',
+  'DISABLED': 'st-disabled', 'UNKNOWN': 'st-waiting',
+};
 
 function Spark({ pts, color }: { pts: number[]; color: string }) {
   if (!pts || pts.length < 3) return null;
@@ -57,6 +64,21 @@ export default function CompetitionPage() {
                 equity <b className="m">{fmtPrice(c.equity)}</b> · dd <span className="neg">{c.max_drawdown_pct}%</span><br />
                 {c.trades} trades{c.win_rate != null && <> · WR {(c.win_rate * 100).toFixed(0)}%</>} · season {c.season}
               </div>
+              <div style={{ marginTop: 6 }}>
+                <span className={`st ${ST[c.status ?? 'UNKNOWN'] ?? 'st-waiting'}`}>{c.status ?? 'UNKNOWN'}</span>
+                {c.symbols_scanned ? (
+                  <span className="faint" style={{ fontSize: 10.5, marginLeft: 6 }}>
+                    scanning {c.symbols_scanned}
+                  </span>
+                ) : null}
+              </div>
+              {!c.has_traded && (
+                <div className="faint" style={{ fontSize: 11, marginTop: 5, lineHeight: 1.45 }}>
+                  {c.idle_reason
+                    ? `Untraded — ${c.idle_reason}`
+                    : 'Untraded — no qualifying setup yet. $10,000 is its starting balance, not a result.'}
+                </div>
+              )}
               <Spark pts={c.spark ?? []} color={c.color} />
             </div>
           </Link>
