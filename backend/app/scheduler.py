@@ -172,6 +172,15 @@ class Scheduler:
                 if phase in ("prep", "premarket"):
                     await self._discovery_cycle(settings, phase)
                     await self._tracking_cycle(settings, finalize=False)
+                    # The model fleet used to sit dark until 09:30, so every
+                    # card read "nothing" through the whole premarket session
+                    # even when its setup was already present on the daily
+                    # bars. Their signals derive from the prior close, which is
+                    # just as valid at 08:00 as at 09:30 — evaluating them here
+                    # gives pre-open visibility. Cadence marks still stop a
+                    # daily model from rebalancing twice.
+                    if self.state["cycles"] % 4 == 0:
+                        await self._models_cycle(settings, phase)
                     if self.state["cycles"] % 5 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "regular":
@@ -989,7 +998,7 @@ class Scheduler:
             await self._health("warn", "regime",
                                f"high_risk: {self.last_regime['why']} — models abstain")
             return
-        intraday_ok = phase == "regular"
+        intraday_ok = phase in ("regular", "premarket", "prep")
         live_syms = (stock_syms if intraday_ok else []) + crypto_syms
         for s in live_syms:
             ctx["bars_5m"][s] = await self.mctx.m5(s)
