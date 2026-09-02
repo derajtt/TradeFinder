@@ -378,6 +378,16 @@ async def strategy_health(request: Request,
             "trades_closed": acc.trades_closed if acc else 0,
         })
     state = getattr(sched, "state", {}) or {}
+    # Expose the worker's live insider cache so an empty universe can be read
+    # directly instead of inferred from logs.
+    mctx = getattr(sched, "mctx", None)
+    ins = getattr(mctx, "_insiders", (0.0, {})) if mctx else (0.0, {})
+    import time as _t
+    insider_cache = {"clusters": len(ins[1] or {}), "head": list(ins[1] or {})[:6],
+                     "age_s": round(_t.monotonic() - ins[0]) if ins[0] else None}
+    for r in rows:
+        if r["id"] == "insider_cluster":
+            r["insider_cache"] = insider_cache
     counts: Dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1

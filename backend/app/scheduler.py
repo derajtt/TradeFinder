@@ -1033,18 +1033,21 @@ class Scheduler:
         # run_daily starved earnings_drift and insider_cluster of a universe on
         # every cycle except the single daily rebalance pass.
         ctx["earnings"] = await self.mctx.earnings_today()
+        # Two independent fetches. When the old `if run_daily:` wrapper was
+        # removed, its `else:` re-attached to this try as a try-ELSE clause —
+        # which runs when the fetch SUCCEEDS — so every successful insider
+        # result was reset to {} before any model saw it, and fundamentals only
+        # loaded when insiders failed. Two models starved by one stray else.
         try:
             ctx["insider_clusters"] = await self.mctx.insider_clusters()
         except Exception as e:
             ctx["insider_clusters"] = {}
             await self._health("warn", "insiders", f"{type(e).__name__}: {e}")
-            try:
-                ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)
-            except Exception:
-                ctx["fundamentals"] = {}
-        else:
-            ctx["insider_clusters"] = {}
+        try:
+            ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)
+        except Exception as e:
             ctx["fundamentals"] = {}
+            await self._health("warn", "fundamentals", f"{type(e).__name__}: {e}")
         # Model settings live in their own store keyed by registry id. They used
         # to be read from the scalper profile table, which never contains a
         # model id, so overrides and the enable/disable switch did nothing.

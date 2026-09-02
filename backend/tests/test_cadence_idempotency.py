@@ -423,3 +423,17 @@ def test_specific_skip_reason_is_not_overwritten():
     src = inspect.getsource(sched.Scheduler._models_cycle)
     assert 'hb["_specific_skip"]' in src
     assert 'hb.pop("_specific_skip", None) or' in src
+
+
+def test_context_fetches_have_no_try_else_that_discards_success():
+    """A try-ELSE clause runs on SUCCESS. One re-attached itself to the insider
+    fetch and reset the result to {} every time the fetch worked."""
+    import inspect, re
+    from app import scheduler as sched
+    src = inspect.getsource(sched.Scheduler._models_cycle)
+    block = src[src.index('ctx["insider_clusters"] = await'):src.index('model_cfg = settings.get')]
+    assert "else:" not in block, "try-else in the context fetch block"
+    assert block.count('ctx["insider_clusters"] = {}') == 1     # only the except path
+    assert 'ctx["fundamentals"] = await self.mctx.fundamentals(stock_syms)' in block
+    # fundamentals must not be nested under the insider except
+    assert re.search(r'except Exception as e:\n\s+ctx\["insider_clusters"\] = \{\}\n\s+await self\._health\("warn", "insiders"[^\n]*\n\s+try:\n\s+ctx\["fundamentals"\]', block) is None
