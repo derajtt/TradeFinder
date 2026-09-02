@@ -394,3 +394,32 @@ def test_insider_pass_logs_stage_counts():
     assert 'log.info("insider_clusters stages:' in src
     for k in ("index_day", "candidates", "fetched", "p_matches"):
         assert f'"{k}"' in src
+
+
+async def test_daily_bars_empty_result_is_not_cached_for_an_hour():
+    """Six insider symbols were fetched with the token bucket drained, got [],
+    and were held empty for an hour — the model's universe stayed empty all
+    session while the data was fine."""
+    import time
+    from app.strategy import platform as plat
+    calls = {"n": 0}
+    class FakeFmp:
+        async def _get(self, path, params, cache_ttl=0, endpoint_name=""):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("bucket drained")
+            return [{"date": "2026-09-01", "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}]
+    ctx = plat.ModelContext(FakeFmp())
+    assert await ctx.daily("BRID") == []                 # first: failed -> []
+    ctx._daily["BRID"] = (time.monotonic() - 200, [])    # 200s later
+    assert len(await ctx.daily("BRID")) == 1             # retried, not stuck
+    ctx._daily["BRID"] = (time.monotonic() - 200, [{"c": 1}])
+    assert await ctx.daily("BRID") == [{"c": 1}] and calls["n"] == 2   # hit held
+
+
+def test_specific_skip_reason_is_not_overwritten():
+    import inspect
+    from app import scheduler as sched
+    src = inspect.getsource(sched.Scheduler._models_cycle)
+    assert 'hb["_specific_skip"]' in src
+    assert 'hb.pop("_specific_skip", None) or' in src

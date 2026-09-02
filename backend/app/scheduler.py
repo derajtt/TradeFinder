@@ -1131,10 +1131,14 @@ class Scheduler:
                 # hid a six-hour cached {} for most of a session.
                 if not symbols:
                     age = _time.monotonic() - (self.mctx._insiders[0] or _time.monotonic())
-                    hb["skip_reason"] = (
+                    # stored under a key the generic post-loop update prefers,
+                    # otherwise it was overwritten by "no symbols matched"
+                    hb["_specific_skip"] = (
                         f"cluster fetch returned 0 (result {age/60:.0f}m old; "
                         f"empty results retry after 15m)" if not clusters else
-                        f"{len(clusters)} cluster(s) found but none had daily bars")
+                        f"{len(clusters)} cluster(s) found ({', '.join(clusters[:4])}) "
+                        f"but daily bars failed to load for all of them — "
+                        f"retries in 2m")
             elif meta["engine"] == "earnings":
                 # Same problem: only companies that actually reported can drift.
                 symbols = await self._load_daily_for(
@@ -1182,9 +1186,10 @@ class Scheduler:
             hb.update({
                 "status": "LIVE" if with_data else ("NO_DATA" if scanned else "WAITING"),
                 "skip_reason": None if with_data else
-                               ("no symbols matched this model's universe"
-                                if not scanned else
-                                f"{scanned} symbol(s) matched but none had usable bars"),
+                               (hb.pop("_specific_skip", None) or
+                                ("no symbols matched this model's universe"
+                                 if not scanned else
+                                 f"{scanned} symbol(s) matched but none had usable bars")),
                 "last_scan_at": now_utc().isoformat(),
                 "last_seen_at": now_utc().isoformat(),
                 "symbols_scanned": scanned, "symbols_with_data": with_data,

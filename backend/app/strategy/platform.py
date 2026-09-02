@@ -42,7 +42,10 @@ class ModelContext:
 
     async def daily(self, sym: str) -> List[dict]:
         hit = self._daily.get(sym)
-        if hit and _time.monotonic() - hit[0] < 3600:
+        # A failed fetch (empty bars) is held 120s, not an hour. Insider's six
+        # cluster symbols were fetched at the tail of a heavy first pass with
+        # the token bucket drained, got [], and were cached empty all session.
+        if hit and _time.monotonic() - hit[0] < (3600 if hit[1] else 120):
             return hit[1]
         try:
             # Rolling window: a fixed end-date literal would silently start
@@ -195,6 +198,7 @@ class ModelContext:
                 if probe:
                     d = d - timedelta(days=_back)
                     break
+            anchor_day = d          # the newest published index day, for the log
             checked = 0
             while checked < 5:
                 if is_trading_day(d):
@@ -207,7 +211,7 @@ class ModelContext:
                                 (row["cik"], row["accession"]))
                 d -= timedelta(days=1)
             cands = {s: rows for s, rows in counts.items() if len(rows) >= 2}
-            _stage = {"index_day": str(d), "index_rows": sum(len(v) for v in counts.values()),
+            _stage = {"index_day": str(anchor_day), "index_rows": sum(len(v) for v in counts.values()),
                       "mapped_issuers": len(counts), "candidates": len(cands),
                       "fetched": 0, "p_matches": 0}
             ua = get_config().sec_user_agent
