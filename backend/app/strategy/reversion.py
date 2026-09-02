@@ -91,6 +91,30 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# The configuration the parameter study actually landed on. It is the least-bad
+# of 1,056 evaluations and still backtested NEGATIVE (-0.364R out-of-sample), so
+# it is never presented as validated. It exists because it is the only variant
+# that produces signals often enough to accumulate forward evidence at all — the
+# strict variants fire roughly once every 500 days and would prove nothing.
+VARIANTS["studied"] = {
+    "label": "Studied (widened)",
+    "note": "Widest thresholds the study examined: 30-period bands at 2.0 sigma, "
+            "RSI 14 oversold at 20, confirmation on. Produces a usable sample. "
+            "Backtested NEGATIVE out-of-sample — carried for evidence, not edge.",
+    "params": {"confirmation": True, "require_reentry": True,
+               "require_rsi_turn": True, "block_breakout_risk": True,
+               "bb_length": 30, "bb_dev": 2.0, "rsi_length": 14,
+               "rsi_oversold": 20.0, "rsi_overbought": 80.0,
+               "stop_model": "pct", "stop_param": 0.5,
+               "exit_model": "bb_basis", "min_score": 0.0},
+}
+VERSIONS["studied"] = "1.3.0"
+
+# Variants evaluated on every live pass. Same bars, so no extra API cost — each
+# records its own signals under its own version, which is what lets the forward
+# record answer "which of these is actually best" rather than assuming.
+LIVE_VARIANTS = ["studied", "confirm", "video_baseline", "adaptive"]
+
 SCORE_WEIGHTS = {
     "rsi_extremeness": 15, "bb_penetration": 15, "bb_reentry": 15,
     "rsi_reversal": 15, "trend_context": 10, "adx_suitability": 10,

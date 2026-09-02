@@ -104,6 +104,50 @@ async def fetch_bars(fmp, symbol: str, interval: str,
     return rows
 
 
+async def scan_symbol_multi(fmp, symbol: str, interval: str, asset_class: str,
+                            variants: List[str],
+                            overrides: Optional[dict] = None
+                            ) -> Tuple[Dict[str, List[dict]], int]:
+    """Fetch the series ONCE, then evaluate every variant against it.
+
+    Variants differ only in parameters, so this costs no extra API calls — and
+    running them side by side on identical bars is what makes their forward
+    records directly comparable.
+    """
+    bars = await fetch_bars(fmp, symbol, interval)
+    if len(bars) < MIN_BARS:
+        return {}, len(bars)
+    htf_trend = _htf_from(bars)
+    out: Dict[str, List[dict]] = {}
+    for v in variants:
+        p = R.params_for(v, overrides or {})
+        sigs = R.scan(bars, p, htf_trend=htf_trend,
+                      start_at=max(0, len(bars) - 6))
+        for sig in sigs:
+            sig["symbol"] = symbol
+            sig["timeframe"] = interval
+            sig["asset_class"] = asset_class
+        out[v] = sigs
+    return out, len(bars)
+
+
+def _htf_from(bars: List[dict]) -> str:
+    """Coarse trend from the same series' own long EMAs when no higher
+    timeframe was fetched. Causal — uses only bars already closed."""
+    from .indicators import ema_series
+    if len(bars) < 220:
+        return "unknown"
+    cl = [b["c"] for b in bars]
+    e200, e50 = ema_series(cl, 200), ema_series(cl, 50)
+    if not e200[-1] or not e50[-1]:
+        return "unknown"
+    if cl[-1] > e200[-1] and e50[-1] > e200[-1]:
+        return "up"
+    if cl[-1] < e200[-1] and e50[-1] < e200[-1]:
+        return "down"
+    return "neutral"
+
+
 async def scan_symbol(fmp, symbol: str, interval: str, asset_class: str,
                       params: Dict[str, Any],
                       htf_bars: Optional[List[dict]] = None

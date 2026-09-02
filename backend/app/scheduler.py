@@ -1132,8 +1132,12 @@ class Scheduler:
                        "last_seen_at": now_utc().isoformat()})
             return
 
-        variant = mcfg.get("variant", "adaptive")
-        params = REV.params_for(variant, mcfg.get("overrides") or {})
+        # Evaluate every live variant on the same bars. Running only the strict
+        # default would fire roughly once every 500 days and accumulate no
+        # forward evidence at all.
+        variants = mcfg.get("variants") or list(REV.LIVE_VARIANTS)
+        overrides = mcfg.get("overrides") or {}
+        variant = variants[0] if variants else "studied"
         risk_settings = await self._risk_settings(settings)
         today = str(now_et().date())
 
@@ -1153,15 +1157,14 @@ class Scheduler:
         scanned = with_data = fired = errors = no_trade = 0
         breaker = await self._breaker_state(risk_settings)
         open_pos = await self._open_risk_rows()
-        stats = await self._reversion_stats(variant)
         for sym, klass in syms:
             for tf in tfs:
                 if tf == RL.FAST_TIMEFRAME and sym not in RL.FAST_SYMBOLS:
                     continue
                 scanned += 1
                 try:
-                    sigs, nbars = await RL.scan_symbol(self.ctx.fmp, sym, tf,
-                                                       klass, params)
+                    by_variant, nbars = await RL.scan_symbol_multi(
+                        self.ctx.fmp, sym, tf, klass, variants, overrides)
                 except Exception as e:
                     errors += 1
                     await self._health("warn", "reversion",
@@ -1169,20 +1172,24 @@ class Scheduler:
                     continue
                 if nbars >= RL.MIN_BARS:
                     with_data += 1
-                for sig in sigs:
-                    if sig.get("status") == "CONFIRMED":
-                        row = await RL.persist_signal(sig, params, risk_settings,
-                                                      open_pos, stats, breaker)
-                        if row:
-                            fired += 1
-                            await broadcaster.publish("reversion_signal", {
-                                "symbol": row.symbol, "timeframe": row.timeframe,
-                                "direction": row.direction,
-                                "score": row.signal_score,
-                                "status": row.status,
-                                "signal_uid": row.signal_uid})
-                    elif sig.get("status") in ("NO_TRADE", "BELOW_THRESHOLD"):
-                        no_trade += 1
+                for vname, sigs in by_variant.items():
+                    vparams = REV.params_for(vname, overrides)
+                    for sig in sigs:
+                        if sig.get("status") == "CONFIRMED":
+                            row = await RL.persist_signal(
+                                sig, vparams, risk_settings, open_pos,
+                                await self._reversion_stats(vname), breaker)
+                            if row:
+                                fired += 1
+                                await broadcaster.publish("reversion_signal", {
+                                    "symbol": row.symbol, "timeframe": row.timeframe,
+                                    "direction": row.direction,
+                                    "variant": row.variant,
+                                    "score": row.signal_score,
+                                    "status": row.status,
+                                    "signal_uid": row.signal_uid})
+                        elif sig.get("status") in ("NO_TRADE", "BELOW_THRESHOLD"):
+                            no_trade += 1
 
         hb.update({
             "status": "PAPER_LIVE" if with_data else "NO_DATA",
@@ -1195,6 +1202,7 @@ class Scheduler:
             "signals_today": (hb.get("signals_today", 0) + fired
                               if hb.get("day") == today else fired),
             "day": today, "variant": variant,
+            "variants_live": variants,
             "rejected_this_pass": no_trade, "tracking": track,
         })
         if fired:

@@ -129,11 +129,18 @@ async def test_outcome_window_bounds(db):
     sig = await make(db, evidence_snapshot={"catalyst": {"catalyst_type": "y",
                                                          "content_hash": "z3",
                                                          "source_url": "u"}})
+    # Pin initiation to a known time on the session date. Leaving it at the
+    # wall clock made this test pass or fail depending on the hour it ran.
+    from datetime import datetime as _dt
+    from app.util.timeutil import ET as _ET
+    sig.initiated_at = _dt(2026, 9, 1, 8, 0, tzinfo=_ET).astimezone(_tz.utc)
+    await db.commit()
+
     s = {"buy_confirm_after_et": "", "early_window_min": 30}
     start, end = outcome_window(sig, s)
     assert (end - start) == timedelta(minutes=30)
     assert abs((start - sig.initiated_at.replace(tzinfo=start.tzinfo)).total_seconds()) < 2
-    # broker window later than initiation pushes the start forward
-    s2 = {"buy_confirm_after_et": "23:59", "early_window_min": 10}
+    # a broker window later than initiation pushes the start forward
+    s2 = {"buy_confirm_after_et": "09:00", "early_window_min": 10}
     start2, end2 = outcome_window(sig, s2)
     assert start2 > start and (end2 - start2) == timedelta(minutes=10)
