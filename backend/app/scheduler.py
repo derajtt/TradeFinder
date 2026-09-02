@@ -110,7 +110,26 @@ class Scheduler:
         except Exception:
             pass
 
+    def _seed_heartbeats(self):
+        """Give every registry model a heartbeat before the first pass, so a
+        strategy that simply has not run yet reads WAITING with a reason rather
+        than UNKNOWN — which is indistinguishable from broken."""
+        for mid, meta in MODELS.items():
+            hb = self.model_health.setdefault(mid, {})
+            if hb.get("status"):
+                continue
+            cadence = meta.get("cadence", "intraday")
+            hb.update({
+                "model_id": mid, "name": meta["name"], "engine": meta["engine"],
+                "cadence": cadence, "enabled": True, "status": "WAITING",
+                "skip_reason": f"{cadence} model — no pass since the service started",
+                "last_seen_at": now_utc().isoformat(),
+                "symbols_scanned": 0, "symbols_with_data": 0,
+                "errors": 0, "signals_today": 0,
+            })
+
     async def _loop(self):
+        self._seed_heartbeats()
         await asyncio.sleep(2)
         async with SessionLocal() as db:
             settings = await get_settings(db)
