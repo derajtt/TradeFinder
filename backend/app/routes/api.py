@@ -1033,7 +1033,8 @@ async def digest(request: Request, db: AsyncSession = Depends(get_session)):
     wins_t = t_c["locks"].get("WIN_10_TOUCH", 0) + t_c["locks"].get("WIN_NOON_GREEN", 0)
     line = (f"Today: {t_c['buys']} BUY, {t_c['early']} early, {t_c['watch']} watch, "
             f"{t_c['rejected']} rejected"
-            + (f", {wins_t}W/{t_c['locks'].get('LOSS_NOON_RED', 0)}L locked at noon"
+            + (f", {wins_t}W/{t_c['locks'].get('LOSS_NOON_RED', 0)}L call accuracy "
+               f"locked at noon (+10% touch, watches included — not paper P&L)"
                if t_c["locks"] else "")
             + f" — vs {prev}: {p_c['buys']} BUY, {p_c['rejected']} rejected.")
     return {"today": {"date": today, **t_c}, "prev": {"date": prev, **p_c},
