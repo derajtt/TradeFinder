@@ -128,6 +128,27 @@ class Scheduler:
                 "errors": 0, "signals_today": 0,
             })
 
+    def _touch_heartbeats(self, phase: str):
+        """Liveness ping for every registry model, once per cycle.
+
+        `last_seen_at` means "the scheduler considered this strategy"; only
+        `last_scan_at` means "it did work". Without this a strategy that is
+        idle by design overnight ages past the staleness window and renders
+        OFFLINE, which is indistinguishable from dead. With it, OFFLINE means
+        what it should: the worker itself has stopped.
+        """
+        now_iso = now_utc().isoformat()
+        for mid, meta in MODELS.items():
+            hb = self.model_health.setdefault(mid, {})
+            hb["last_seen_at"] = now_iso
+            if mid == "premarket_scalper" and phase not in ("prep", "premarket",
+                                                            "regular"):
+                hb.setdefault("name", meta["name"])
+                hb.setdefault("engine", meta["engine"])
+                hb["status"] = "WAITING"
+                hb["skip_reason"] = ("premarket discovery runs 03:45–16:00 ET; "
+                                     "idle by design outside that window")
+
     async def _loop(self):
         self._seed_heartbeats()
         await asyncio.sleep(2)
@@ -187,6 +208,7 @@ class Scheduler:
                     interval = 60
                 self.state["cycles"] += 1
                 self.state["last_cycle_at"] = now_utc().isoformat()
+                self._touch_heartbeats(phase)
                 await self._flush_provider_logs()
                 await self._persist_heartbeats()
             except asyncio.CancelledError:
