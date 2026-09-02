@@ -1068,10 +1068,18 @@ class Scheduler:
                 continue
             allowed = REGIME_ALLOW.get(meta["engine"], {"trend", "range",
                                                         "uncertain"})
-            if reg_state not in allowed:
+            regime_favours = reg_state in allowed
+            # Regime gating is ADVISORY by default. Blocking outright meant six
+            # breakout models never traded in a range market, so their ledgers
+            # stayed untouched and we never learned whether abstaining actually
+            # helped. Every signal records `regime_favoured`, so the comparison
+            # can be made from data instead of assumed. Set regime_gating to
+            # "block" to restore hard abstention.
+            if not regime_favours and str(
+                    settings.get("regime_gating", "advisory")).lower() == "block":
                 hb.update({"status": "WAITING", "skip_reason":
                            f"regime '{reg_state}' not in this model's allowed set "
-                           f"{sorted(allowed)}",
+                           f"{sorted(allowed)} (regime_gating=block)",
                            "last_seen_at": now_utc().isoformat()})
                 continue
             cadence = meta.get("cadence", "intraday")
@@ -1139,6 +1147,10 @@ class Scheduler:
                 base = sym.split("|")[0]
                 q = (ctx["bars_5m"].get(base) or ctx["bars_daily"].get(base) or [])
                 qp = q[-1]["c"] if q else v["entry"]
+                v = {**v, "evidence": {**(v.get("evidence") or {}),
+                                       "regime_state": reg_state,
+                                       "regime_favoured": regime_favours,
+                                       "regime_allowed_set": sorted(allowed)}}
                 sig = await mplat.record_model_signal(mid, base, v, qp, today,
                                                       settings)
                 if sig:

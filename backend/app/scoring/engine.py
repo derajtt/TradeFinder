@@ -24,6 +24,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "allow_estimated_rvol": True,
     "est_rvol_buy_multiplier": 1.5,
     "min_score_for_buy": 75,
+    # "advisory" lets every model trade in every regime while recording whether
+    # the regime favoured the setup, so the value of gating can be measured
+    # from results. "block" restores hard abstention.
+    "regime_gating": "advisory",
     "min_catalyst_confidence": 0.6,
     "max_extension_from_pm_high_pct": 25.0,
     "quote_freshness_sec": 120,

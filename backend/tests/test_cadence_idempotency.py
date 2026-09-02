@@ -140,3 +140,21 @@ async def test_scalper_page_query_finds_its_signals(db):
     only = (await db.execute(select(BuySignal).where(
         _profile_filter(BuySignal.profile, "aggressive")))).scalars().all()
     assert {r.profile for r in only} == {"aggressive"}
+
+
+def test_regime_gating_is_advisory_by_default():
+    """Blocking outright left six breakout models permanently untraded in a
+    range market, so their ledgers never moved and the gate's value could never
+    be measured. They now trade and record whether the regime favoured them."""
+    import inspect
+    from app import scheduler as sched
+    from app.scoring.engine import DEFAULT_SETTINGS
+
+    assert DEFAULT_SETTINGS.get("regime_gating") == "advisory"
+    src = inspect.getsource(sched.Scheduler._models_cycle)
+    # the skip must be conditional on the setting, not unconditional
+    assert 'settings.get("regime_gating"' in src
+    assert '== "block"' in src
+    # and every signal must carry the regime context for later analysis
+    assert '"regime_favoured": regime_favours' in src
+    assert '"regime_state": reg_state' in src
