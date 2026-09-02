@@ -173,15 +173,23 @@ class Scheduler:
                 phase = session_phase()
                 self.state["phase"] = phase
                 paused = bool(settings.get("paused")) or not self.scan_enabled
-                interval = max(20, int(settings.get("scan_interval_sec") or 60))
+                # Loop tick. The heavy lanes are modulo-gated above, so a
+                # faster tick refreshes the finder cards without increasing the
+                # quote load that actually consumes the API budget.
+                interval = max(15, int(settings.get("scan_interval_sec") or 60) // 2)
                 if paused:
                     self.state["next_run_at"] = None
                     await broadcaster.publish("scanner", {"phase": phase, "paused": True})
                     await asyncio.sleep(10)
                     continue
                 if phase in ("prep", "premarket"):
-                    await self._discovery_cycle(settings, phase)
-                    await self._tracking_cycle(settings, finalize=False)
+                    # Discovery and tracking are the API-heavy lanes (a quote
+                    # pair per tracked symbol), so they stay on a ~60s beat even
+                    # though the loop now ticks faster. Models refresh on every
+                    # tick because their context is cached.
+                    if self.state["cycles"] % 2 == 0:
+                        await self._discovery_cycle(settings, phase)
+                        await self._tracking_cycle(settings, finalize=False)
                     # The model fleet used to sit dark until 09:30, so every
                     # card read "nothing" through the whole premarket session
                     # even when its setup was already present on the daily
@@ -189,21 +197,23 @@ class Scheduler:
                     # just as valid at 08:00 as at 09:30 — evaluating them here
                     # gives pre-open visibility. Cadence marks still stop a
                     # daily model from rebalancing twice.
-                    if self.state["cycles"] % 10 == 0:
-                        await self._models_cycle(settings, phase)
-                    if self.state["cycles"] % 8 == 0:
+                    # Model context is TTL-cached (daily 1h, 5-min 4min), so a
+                    # pass is nearly free in API terms. Gating it to every 10th
+                    # cycle left every finder card stale for ten minutes.
+                    await self._models_cycle(settings, phase)
+                    if self.state["cycles"] % 4 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "regular":
-                    await self._tracking_cycle(settings, finalize=False)
-                    if self.state["cycles"] % 5 == 0:
+                    if self.state["cycles"] % 2 == 0:
+                        await self._tracking_cycle(settings, finalize=False)
+                    if self.state["cycles"] % 10 == 0:
                         await self._discovery_cycle(settings, phase)  # keep candidate table fresh
+                    await self._models_cycle(settings, phase)
                     if self.state["cycles"] % 3 == 0:
-                        await self._models_cycle(settings, phase)
-                    if self.state["cycles"] % 6 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
-                    if self.state["cycles"] % 10 == 0:
+                    if self.state["cycles"] % 3 == 0:
                         await self._models_cycle(settings, phase)  # crypto lane
                     if self.state["cycles"] % 5 == 0:
                         await self._reversion_cycle(settings, phase)
