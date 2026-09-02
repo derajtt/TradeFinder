@@ -29,14 +29,15 @@ STRATEGY_ID = "extreme_reversion"
 # Bars needed before any signal can form (BB + RSI + ADX warmup + margin).
 MIN_BARS = 260
 
-STOCK_UNIVERSE = ["SPY", "QQQ", "IWM", "NVDA", "TSLA", "AMD", "MARA", "COIN"]
+STOCK_UNIVERSE = ["SPY", "QQQ", "IWM", "NVDA", "TSLA", "AMD", "MARA", "COIN",
+                  "AAPL", "META", "SMH", "RIOT", "PLTR", "GDX"]
 CRYPTO_UNIVERSE = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "ADAUSD"]
-# One timeframe per pass keeps this worker's footprint small. It is the
-# newest lane and the one with a negative backtest, so it must never be the
-# reason the scanner runs out of API budget.
-TIMEFRAMES = ["1hour"]
+# Measured footprint is ~14 calls per pass, well inside budget now that the
+# limiter jitters and drains on 429. Two timeframes roughly triples the chance
+# of catching a setup, which matters because the setup is genuinely rare.
+TIMEFRAMES = ["15min", "1hour"]
 FAST_TIMEFRAME = "5min"
-FAST_SYMBOLS = ["SPY", "BTCUSD"]
+FAST_SYMBOLS = ["SPY", "QQQ", "BTCUSD", "ETHUSD"]
 
 # Signals expire after this many bars of the signal's own timeframe.
 EXPIRY_BARS = 5

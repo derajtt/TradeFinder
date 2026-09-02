@@ -181,7 +181,7 @@ class Scheduler:
                     # daily model from rebalancing twice.
                     if self.state["cycles"] % 10 == 0:
                         await self._models_cycle(settings, phase)
-                    if self.state["cycles"] % 15 == 0:
+                    if self.state["cycles"] % 8 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "regular":
                     await self._tracking_cycle(settings, finalize=False)
@@ -189,7 +189,7 @@ class Scheduler:
                         await self._discovery_cycle(settings, phase)  # keep candidate table fresh
                     if self.state["cycles"] % 3 == 0:
                         await self._models_cycle(settings, phase)
-                    if self.state["cycles"] % 12 == 0:
+                    if self.state["cycles"] % 6 == 0:
                         await self._reversion_cycle(settings, phase)
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
