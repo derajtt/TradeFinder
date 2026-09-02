@@ -10,7 +10,10 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 
 from ..db import SessionLocal
+import logging
+
 from ..models import (BuySignal, LockedOutcome, PaperAccount, PaperPosition,
+                      RejectedCandidate,
                       SignalEvent)
 from ..signals import service as sigsvc
 from ..util.timeutil import ET, is_trading_day, now_et, now_utc
@@ -127,7 +130,16 @@ class ModelContext:
             data = BtData(SessionLocal, rps=1.5)
             cmap = await data.cik_ticker_map()
             counts: Dict[str, list] = {}
+            # EDGAR publishes the daily form index after the close, so "today"
+            # is empty for the whole trading session and "yesterday" often is
+            # too. Walk back to the most recent day that actually has filings;
+            # without this the model never had a universe during market hours.
             d = now_et().date()
+            for _back in range(7):
+                probe = await data.form4_index(str(d - timedelta(days=_back)))
+                if probe:
+                    d = d - timedelta(days=_back)
+                    break
             checked = 0
             while checked < 5:
                 if is_trading_day(d):
@@ -195,6 +207,36 @@ class ModelContext:
         return out
 
 
+# Smallest stop distance a model position may carry, as a fraction of the
+# fill. Below this, slippage alone can put the fill past the target.
+log = logging.getLogger(__name__)
+
+MIN_RISK_FRAC = 0.0015
+
+
+async def _reject_geometry(db, model_id, symbol, session_date, verdict, fill, why):
+    """Record a geometry rejection so a model that keeps producing untradeable
+    levels is visible on its page instead of silently emitting nothing."""
+    # Build the row first so a bad field fails loudly instead of being
+    # swallowed. Never roll back the caller's session from inside a helper —
+    # that discards work the caller has not committed yet.
+    row = RejectedCandidate(
+        symbol=symbol, session_date=session_date, profile=model_id,
+        lifecycle="REJECTED", price_at_reject=fill,
+        rejection_reason=f"invalid_trade_geometry: {why}",
+        failed_gates=["trade_geometry"],
+        snapshot={"verdict_levels": {k: verdict.get(k) for k in
+                                     ("entry", "stop", "target1", "target2")},
+                  "fill": fill})
+    try:
+        db.add(row)
+        await db.commit()
+    except Exception as e:                       # logging must not block trading
+        db.expunge(row)
+        log.warning("geometry rejection not recorded for %s/%s: %s",
+                    model_id, symbol, e)
+
+
 async def get_account(db, model_id: str, season: int = 1) -> PaperAccount:
     acc = (await db.execute(select(PaperAccount).where(
         PaperAccount.model_id == model_id,
@@ -229,6 +271,28 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         if held:
             return None
         fill = round(verdict["entry"] * (1 + slip), 4)
+        # Geometry check AGAINST THE ACTUAL FILL, not the engine's raw entry.
+        # Two engines shipped positions whose targets sat behind the entry:
+        # breakout measured its target from the zone rather than the entry,
+        # and confluence set a stop so tight that the 0.4% slippage carried the
+        # fill past target1. Either way `px >= target` was true on the first
+        # tick, the position closed at a loss labelled "target2", and the win
+        # counter recorded it as a target hit. _mk() only ever checked
+        # entry > stop. A position must satisfy stop < fill < t1 <= t2 with a
+        # real risk distance, or it is not a trade.
+        stop_, t1_, t2_ = verdict["stop"], verdict["target1"], verdict["target2"]
+        min_risk = fill * MIN_RISK_FRAC
+        bad = None
+        if stop_ is None or stop_ >= fill - min_risk:
+            bad = f"stop {stop_} not at least {MIN_RISK_FRAC:.2%} below fill {fill}"
+        elif t1_ is None or t1_ <= fill:
+            bad = f"target1 {t1_} is not above fill {fill}"
+        elif t2_ is not None and t2_ < t1_:
+            bad = f"target2 {t2_} is below target1 {t1_}"
+        if bad:
+            await _reject_geometry(db, model_id, symbol, session_date, verdict,
+                                   fill, bad)
+            return None
         sig = await sigsvc.create_buy_signal(
             db, symbol=symbol, session_date=session_date,
             strategy_version=VERSIONS["strategy_version"],
@@ -261,7 +325,11 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
                             target1=verdict["target1"],
                             target2=verdict["target2"], size_usd=round(size_usd, 2),
                             events=[{"t": now_utc().isoformat(), "e": "opened",
-                                     "fill": fill, "holding": verdict["holding"]}])
+                                     "fill": fill, "holding": verdict["holding"],
+                                     # kept so R is always measured against the
+                                     # risk actually taken, even after the stop
+                                     # is moved to breakeven
+                                     "original_stop": verdict["stop"]}])
         db.add(pos)
         acc.cash = round(acc.cash - size_usd, 2)
         await db.commit()
@@ -290,7 +358,14 @@ async def settle_positions(db, quotes: Dict[str, dict],
         ev = list(pos.events or [])
         holding = next((e.get("holding") for e in ev if e.get("holding")), "swing")
         slip = {"slippage_pct": settings.get("slippage_pct", 0.4)}
-        risk = max(1e-9, pos.entry_fill - (pos.stop or pos.entry_fill * 0.95))
+        # R is measured against the ORIGINAL stop. Using the current stop
+        # meant that after a move to breakeven (stop == entry) risk collapsed
+        # to 1e-9 and a stop-out printed R = -201,000,000.
+        orig_stop = next((e.get("original_stop") for e in ev
+                          if e.get("e") == "opened" and e.get("original_stop")),
+                         None)
+        risk = max(pos.entry_fill * MIN_RISK_FRAC,
+                   pos.entry_fill - (orig_stop or pos.stop or pos.entry_fill * 0.95))
 
         pnl_delta = 0.0
 

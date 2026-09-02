@@ -6,7 +6,7 @@ import { fmtNum, fmtPrice } from '../../lib/format';
 interface Card { model_id: string; name: string; color: string; experimental: boolean;
   season: number; equity: number; cash: number; return_pct: number; realized_pnl: number;
   max_drawdown_pct: number; trades: number; wins: number; win_rate: number | null;
-  spark?: number[]; status?: string; idle_reason?: string | null;
+  spark?: number[]; status?: string; idle_reason?: string | null; last_marked_at?: string | null;
   symbols_scanned?: number; has_traded?: boolean; }
 
 const ST: Record<string, string> = {
@@ -33,7 +33,9 @@ interface Comp { cards: Card[]; leaderboards: Record<string, Card[]>; note: stri
 interface ResearchOnly { id: string; name: string; why_not: string; }
 
 export default function CompetitionPage() {
-  const [comp] = usePolling<Comp>('/api/competition', 30000);
+  // Equity is re-marked every ~60s by the tracking cycle; poll faster than
+  // that so a refresh never shows a stale number for a full cycle.
+  const [comp] = usePolling<Comp>('/api/competition', 15000);
   const [models] = usePolling<{ research_only: ResearchOnly[]; regime: any }>('/api/models', 60000);
   if (!comp) return <div className="skel" style={{ height: 400, marginTop: 20 }} />;
   const cards = comp.cards ?? [];
@@ -61,7 +63,8 @@ export default function CompetitionPage() {
                 {c.return_pct >= 0 ? '+' : ''}{c.return_pct.toFixed(2)}%
               </div>
               <div className="sub">
-                equity <b className="m">{fmtPrice(c.equity)}</b> · dd <span className="neg">{c.max_drawdown_pct}%</span><br />
+                equity <b className="m">{fmtPrice(c.equity)}</b> · dd <span className="neg">{c.max_drawdown_pct}%</span>
+                {c.last_marked_at && <span className="faint" title="When this equity was last marked to live prices"> · marked {Math.max(0, Math.round((Date.now() - Date.parse(c.last_marked_at)) / 1000))}s ago</span>}<br />
                 {c.trades} trades{c.win_rate != null && <> · WR {(c.win_rate * 100).toFixed(0)}%</>} · season {c.season}
               </div>
               <div style={{ marginTop: 6 }}>

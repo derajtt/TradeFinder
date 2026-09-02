@@ -782,7 +782,9 @@ async def competition(request: Request, db: AsyncSession = Depends(get_session))
                       "last_scan_at": (health.get(mid) or {}).get("last_scan_at"),
                       "symbols_scanned": (health.get(mid) or {}).get("symbols_scanned", 0),
                       "has_traded": bool(a and (a.trades_closed or
-                                                abs(a.equity - a.starting_cash) > 0.005))})
+                                                abs(a.equity - a.starting_cash) > 0.005)),
+                      "last_marked_at": (a.updated_at.isoformat()
+                                         if a and a.updated_at else None)})
     boards = {}
     with_trades = [c for c in cards if c["trades"] >= 1]
     boards["net_return"] = sorted(cards, key=lambda c: c["return_pct"],

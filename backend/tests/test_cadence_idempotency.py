@@ -190,3 +190,71 @@ def test_day_trading_mode_flattens_every_model_daily():
     assert 'day_trading_mode' in src
     assert 'eod = day_mode or holding == "intraday"' in src
     assert '24h_time_exit' in src, "crypto needs its own daily boundary"
+
+
+async def test_position_with_target_behind_entry_is_refused(db, monkeypatch):
+    """Breakout measured its target from the zone, confluence set a stop tighter
+    than the slippage. Both produced positions whose target sat below the fill,
+    which closed at a loss on the first tick labelled as a target hit."""
+    import app.strategy.platform as plat
+    from app.models import PaperPosition, RejectedCandidate
+    from sqlalchemy import select
+
+    class _Ctx:
+        def __init__(self, s): self.s = s
+        async def __aenter__(self): return self.s
+        async def __aexit__(self, *a): return False
+    monkeypatch.setattr(plat, "SessionLocal", lambda: _Ctx(db))
+
+    base = {"action": "buy", "score": 70, "setup": "t", "evidence": {},
+            "holding": "swing"}
+    # target below entry
+    v = {**base, "entry": 100.0, "stop": 99.0, "target1": 99.5, "target2": 99.7}
+    assert await plat.record_model_signal("breakout_finder", "GEO1", v, 100.0,
+                                          "2026-09-02", {}) is None
+    # stop tighter than slippage: fill = 100.4, target1 = 100.05 < fill
+    v = {**base, "entry": 100.0, "stop": 99.98, "target1": 100.05, "target2": 100.1}
+    assert await plat.record_model_signal("technical_confluence", "GEO2", v, 100.0,
+                                          "2026-09-02", {"slippage_pct": 0.4}) is None
+    # sane geometry still opens
+    v = {**base, "entry": 100.0, "stop": 98.5, "target1": 102.5, "target2": 104.0}
+    assert await plat.record_model_signal("breakout_finder", "GEO3", v, 100.0,
+                                          "2026-09-02", {}) is not None
+    opened = (await db.execute(select(PaperPosition))).scalars().all()
+    assert [p.symbol for p in opened] == ["GEO3"]
+    rej = (await db.execute(select(RejectedCandidate))).scalars().all()
+    assert len(rej) == 2 and all("invalid_trade_geometry" in r.rejection_reason for r in rej)
+    # and the original stop is preserved for R even if the stop later moves
+    assert opened[0].events[0]["original_stop"] == 98.5
+
+
+async def test_r_multiple_uses_original_stop_after_breakeven(db, monkeypatch):
+    """After a move to breakeven the current stop equals entry; measuring R
+    against it made risk ~0 and printed R in the hundreds of millions."""
+    import app.strategy.platform as plat
+    from app.models import PaperPosition
+    from sqlalchemy import select
+
+    class _Ctx:
+        def __init__(self, s): self.s = s
+        async def __aenter__(self): return self.s
+        async def __aexit__(self, *a): return False
+    monkeypatch.setattr(plat, "SessionLocal", lambda: _Ctx(db))
+    v = {"action": "buy", "entry": 100.0, "stop": 98.0, "target1": 103.0,
+         "target2": 106.0, "score": 70, "setup": "t", "evidence": {}, "holding": "swing"}
+    await plat.record_model_signal("trend_following", "BEQ", v, 100.0, "2026-09-02", {})
+    pos = (await db.execute(select(PaperPosition))).scalars().first()
+    pos.stop = pos.entry_fill          # simulate the breakeven move
+    await db.commit()
+    await plat.settle_positions(db, {"BEQ": {"price": pos.entry_fill - 0.01,
+                                             "bid": pos.entry_fill - 0.01}}, {})
+    pos = (await db.execute(select(PaperPosition))).scalars().first()
+    assert pos.status == "closed"
+    assert -1.5 < pos.realized_r < 0.5, pos.realized_r   # sane, not -2e8
+
+
+def test_insider_engine_looks_back_to_a_published_index():
+    import inspect
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.ModelContext.insider_clusters)
+    assert "for _back in range(7)" in src and "form4_index" in src
