@@ -330,7 +330,20 @@ async def strategy_health(request: Request,
                  (await db.execute(select(StrategyHeartbeat))).scalars().all()}
     accounts = {a.model_id: a for a in
                 (await db.execute(select(PaperAccount))).scalars().all()}
-    from .api import LEDGER_ALIAS
+    from .api import LEDGER_ALIAS, SCALPER_PROFILES
+    from ..models import BuySignal
+    from ..util.timeutil import now_et
+    # Signals-today from the database, not the worker's memory: the in-memory
+    # counter reset to zero on every restart, so each deploy made every finder
+    # look idle for the rest of the session.
+    today = str(now_et().date())
+    sig_rows = (await db.execute(
+        select(BuySignal.profile, func.count(BuySignal.id))
+        .where(BuySignal.session_date == today, BuySignal.is_demo == False,  # noqa: E712
+               BuySignal.lifecycle == "ACTIONABLE_BUY")
+        .group_by(BuySignal.profile))).all()
+    sig_today = {p: n for p, n in sig_rows}
+    scalper_today = sum(n for p, n in sig_today.items() if p in SCALPER_PROFILES)
 
     rows = []
     for mid, meta in MODELS.items():
@@ -356,7 +369,8 @@ async def strategy_health(request: Request,
             "last_seen_at": hb.get("last_seen_at"),
             "symbols_scanned": hb.get("symbols_scanned", 0),
             "symbols_with_data": hb.get("symbols_with_data", 0),
-            "signals_today": hb.get("signals_today", 0),
+            "signals_today": (scalper_today if mid == "premarket_scalper"
+                              else sig_today.get(mid, 0)),
             "errors": hb.get("errors", 0),
             "skip_reason": hb.get("skip_reason"),
             "universe": hb.get("universe"),

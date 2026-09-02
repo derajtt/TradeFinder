@@ -307,3 +307,24 @@ def test_insider_fetches_the_submission_inside_the_accession_folder():
     assert plat._ACQUIRED_RE.search(
         "<transactionAcquiredDisposedCode>\n  <value>A</value>") is not None
     assert plat._ACQUIRED_RE.search("<value>D</value>") is None
+
+
+def test_breakout_targets_are_never_behind_the_entry():
+    """Zone + half-height fell below the entry once price had run past the
+    zone; ten positions were rejected for t1 <= fill in one session."""
+    import inspect
+    from app.strategy import engines
+    src = inspect.getsource(engines.breakout)
+    assert 'max(z["level"] + height * 0.5, px + 1.5 * risk_)' in src
+    assert 'max(z["level"] + height, t1_ + (t1_ - px))' in src
+
+
+def test_insider_fetches_are_paced_and_retry_on_429():
+    """Unpaced fetches drew HTTP 429 from EDGAR on every document, so the
+    verifier never saw a filing and no cluster was ever found."""
+    import inspect
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.ModelContext.insider_clusters)
+    assert "await asyncio.sleep(SEC_FETCH_GAP_S)" in src
+    assert "r.status_code == 429" in src
+    assert 0 < plat.SEC_FETCH_GAP_S <= 0.2        # under SEC's 10 req/s

@@ -355,12 +355,19 @@ def breakout(ctx, sym, cfg) -> Optional[dict]:
         return None
     stop = z["level"] * 0.99
     height = z["level"] - min(x["l"] for x in d[-20:])
-    return _mk("buy", px, stop, z["level"] + height * 0.5, 55 + min(20, z["touches"] * 5)
+    # The measured move is anchored on the zone, but by the time the break is
+    # confirmed price has often run past it — so zone + half-height can land
+    # BELOW the entry and the position closes at a loss on the first tick.
+    # Targets are the larger of the measured move and a real reward from entry.
+    risk_ = px - stop
+    t1_ = max(z["level"] + height * 0.5, px + 1.5 * risk_)
+    t2_ = max(z["level"] + height, t1_ + (t1_ - px))
+    return _mk("buy", px, stop, t1_, 55 + min(20, z["touches"] * 5)
                + min(15, rv * 4), "resistance_zone_break",
                {"level": round(z["level"], 3), "touches": z["touches"],
                 "persist_bars": persist, "rvol": round(rv, 2),
                 "target_method": "measured_move_50pct"}, "swing",
-               t2=z["level"] + height)
+               t2=t2_)
 
 
 # ── Model 12: Gaussian Channel ──────────────────────────────────────────

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 
 from ..db import SessionLocal
+import asyncio
 import logging
 import re
 
@@ -220,11 +221,23 @@ class ModelContext:
                         # real purchase clusters in its data never once fired.
                         url = (f"https://www.sec.gov/Archives/edgar/data/"
                                f"{int(cik)}/{nod}/{acc}.txt")
-                        try:
-                            r = await client.get(url)
-                            txt = r.text[:200000] if r.status_code == 200 else ""
-                        except httpx.HTTPError:
-                            txt = ""
+                        txt = ""
+                        # EDGAR allows 10 req/s and answers 429 with an HTML
+                        # rate-limit page — which is exactly what every fetch
+                        # was getting, because this loop had no pacing at all.
+                        for _try in range(2):
+                            try:
+                                await asyncio.sleep(SEC_FETCH_GAP_S)
+                                r = await client.get(url)
+                            except httpx.HTTPError:
+                                break
+                            if r.status_code == 200:
+                                txt = r.text[:200000]
+                                break
+                            if r.status_code == 429:
+                                await asyncio.sleep(3.0 * (_try + 1))
+                                continue
+                            break
                         if ("<transactionCode>P</transactionCode>" in txt and
                                 _ACQUIRED_RE.search(txt)):
                             buyers += 1
@@ -266,6 +279,8 @@ log = logging.getLogger(__name__)
 
 MIN_RISK_FRAC = 0.0015
 INSIDER_DOC_FETCH_CAP = 120
+# pacing between EDGAR document fetches: ~8/s, under SEC's 10/s ceiling
+SEC_FETCH_GAP_S = 0.13
 # Form 4 acquired/disposed flag, matched on the actual tag rather than a bare ">A<"
 _ACQUIRED_RE = re.compile(r"<transactionAcquiredDisposedCode>\s*<value>A</value>")
 
