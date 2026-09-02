@@ -7,6 +7,7 @@ import { usePolling } from '../lib/api';
 const CORE = [
   { href: '/', label: 'Command Center', ico: '⌂' },
   { href: '/competition', label: 'Competition', ico: '🏁' },
+  { href: '/reversion', label: 'Extreme Reversion', ico: '⇄' },
   { href: '/chart', label: 'Chart Workstation', ico: '📈' },
   { href: '/watchlists', label: 'Watchlists & Alerts', ico: '★' },
   { href: '/feed', label: 'News & Filings', ico: '📰' },
@@ -14,6 +15,8 @@ const CORE = [
   { href: '/journal', label: 'Journal', ico: '✎' },
   { href: '/signals', label: 'Signal History', ico: '≣' },
   { href: '/performance', label: 'Performance', ico: '∿' },
+  { href: '/accuracy', label: 'Accuracy Board', ico: '◎' },
+  { href: '/risk', label: 'Risk & Sizing', ico: '⚖' },
   { href: '/backtest', label: 'Backtesting', ico: '↺' },
   { href: '/lab', label: 'Exit Lab', ico: '⚗' },
   { href: '/settings', label: 'Settings', ico: '⚙' },
@@ -33,7 +36,7 @@ export default function Nav() {
         <span className="brand-dot" aria-hidden />
         <span><b>TRADEFINDER</b><small>MULTI-STRATEGY</small></span>
       </div>
-      {CORE.slice(0, 3).map((l) => (
+      {CORE.slice(0, 4).map((l) => (
         <Link key={l.href} href={l.href}
           className={`nav-link ${path === l.href ? 'active' : ''}`}
           aria-current={path === l.href ? 'page' : undefined}>
@@ -60,7 +63,7 @@ export default function Nav() {
           </span>
         </Link>
       ))}
-      {CORE.slice(3).map((l) => (
+      {CORE.slice(4).map((l) => (
         <Link key={l.href} href={l.href}
           className={`nav-link ${path === l.href ? 'active' : ''}`}
           aria-current={path === l.href ? 'page' : undefined}>

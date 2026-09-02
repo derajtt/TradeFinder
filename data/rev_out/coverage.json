@@ -1,0 +1,938 @@
+[
+ {
+  "symbol": "AAPL",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "AAPL",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "AAPL",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "MSFT",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "MSFT",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "MSFT",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "NVDA",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "NVDA",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "NVDA",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "AMZN",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "AMZN",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "AMZN",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "META",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "META",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "META",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "GOOGL",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "GOOGL",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "GOOGL",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "TSLA",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "TSLA",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "TSLA",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "JPM",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "JPM",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "JPM",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "XOM",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "XOM",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "XOM",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "UNH",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "UNH",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "UNH",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "V",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "V",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "V",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "WMT",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "large_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "WMT",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "large_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "WMT",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "ROKU",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "mid_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "ROKU",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "mid_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "ROKU",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "mid_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "DKNG",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "mid_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "DKNG",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "mid_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "DKNG",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "mid_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "PINS",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "mid_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "PINS",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "mid_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "PINS",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "mid_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "PLTR",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "mid_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "PLTR",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "mid_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "PLTR",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "mid_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "SOFI",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "mid_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "SOFI",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "mid_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "SOFI",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "mid_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "RIVN",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "mid_cap",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "RIVN",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "mid_cap",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "RIVN",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "mid_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "MARA",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "small_cap_liquid",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "MARA",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "MARA",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "RIOT",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "small_cap_liquid",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "RIOT",
+  "timeframe": "4hour",
+  "bars": 749,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "RIOT",
+  "timeframe": "1hour",
+  "bars": 2902,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "PLUG",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "small_cap_liquid",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "PLUG",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "PLUG",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "LCID",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "small_cap_liquid",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "LCID",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "LCID",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "SPY",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "etf",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "SPY",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "etf",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "SPY",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "QQQ",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "etf",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "QQQ",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "etf",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "QQQ",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "IWM",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "etf",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "IWM",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "etf",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "IWM",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "XLE",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "etf",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "XLE",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "etf",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "XLE",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "XLF",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "etf",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "XLF",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "etf",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "XLF",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "SMH",
+  "timeframe": "1day",
+  "bars": 918,
+  "asset_class": "etf",
+  "first": "2022-01-03",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "SMH",
+  "timeframe": "4hour",
+  "bars": 750,
+  "asset_class": "etf",
+  "first": "2024-01-22 09:30:00",
+  "last": "2025-08-29 13:30:00"
+ },
+ {
+  "symbol": "SMH",
+  "timeframe": "1hour",
+  "bars": 2907,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "BTCUSD",
+  "timeframe": "1day",
+  "bars": 1337,
+  "asset_class": "crypto",
+  "first": "2022-01-01",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "BTCUSD",
+  "timeframe": "4hour",
+  "bars": 3283,
+  "asset_class": "crypto",
+  "first": "2024-01-21 00:00:00",
+  "last": "2025-08-29 20:00:00"
+ },
+ {
+  "symbol": "BTCUSD",
+  "timeframe": "1hour",
+  "bars": 14566,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:00:00"
+ },
+ {
+  "symbol": "ETHUSD",
+  "timeframe": "1day",
+  "bars": 1337,
+  "asset_class": "crypto",
+  "first": "2022-01-01",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "ETHUSD",
+  "timeframe": "4hour",
+  "bars": 3283,
+  "asset_class": "crypto",
+  "first": "2024-01-21 00:00:00",
+  "last": "2025-08-29 20:00:00"
+ },
+ {
+  "symbol": "ETHUSD",
+  "timeframe": "1hour",
+  "bars": 14566,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:00:00"
+ },
+ {
+  "symbol": "SOLUSD",
+  "timeframe": "1day",
+  "bars": 1337,
+  "asset_class": "crypto",
+  "first": "2022-01-01",
+  "last": "2025-08-29"
+ },
+ {
+  "symbol": "SOLUSD",
+  "timeframe": "4hour",
+  "bars": 3283,
+  "asset_class": "crypto",
+  "first": "2024-01-21 00:00:00",
+  "last": "2025-08-29 20:00:00"
+ },
+ {
+  "symbol": "SOLUSD",
+  "timeframe": "1hour",
+  "bars": 14558,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:00:00"
+ },
+ {
+  "symbol": "AAPL",
+  "timeframe": "30min",
+  "bars": 5397,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "AAPL",
+  "timeframe": "15min",
+  "bars": 10794,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:45:00"
+ },
+ {
+  "symbol": "AAPL",
+  "timeframe": "5min",
+  "bars": 32382,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:55:00"
+ },
+ {
+  "symbol": "NVDA",
+  "timeframe": "30min",
+  "bars": 5397,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "NVDA",
+  "timeframe": "15min",
+  "bars": 10794,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:45:00"
+ },
+ {
+  "symbol": "NVDA",
+  "timeframe": "5min",
+  "bars": 32382,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:55:00"
+ },
+ {
+  "symbol": "TSLA",
+  "timeframe": "30min",
+  "bars": 5397,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "TSLA",
+  "timeframe": "15min",
+  "bars": 10794,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:45:00"
+ },
+ {
+  "symbol": "TSLA",
+  "timeframe": "5min",
+  "bars": 32382,
+  "asset_class": "large_cap",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:55:00"
+ },
+ {
+  "symbol": "SPY",
+  "timeframe": "30min",
+  "bars": 5397,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "SPY",
+  "timeframe": "15min",
+  "bars": 10794,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:45:00"
+ },
+ {
+  "symbol": "SPY",
+  "timeframe": "5min",
+  "bars": 32377,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:55:00"
+ },
+ {
+  "symbol": "QQQ",
+  "timeframe": "30min",
+  "bars": 5397,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "QQQ",
+  "timeframe": "15min",
+  "bars": 10794,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:45:00"
+ },
+ {
+  "symbol": "QQQ",
+  "timeframe": "5min",
+  "bars": 32382,
+  "asset_class": "etf",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:55:00"
+ },
+ {
+  "symbol": "MARA",
+  "timeframe": "30min",
+  "bars": 5397,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:30:00"
+ },
+ {
+  "symbol": "MARA",
+  "timeframe": "15min",
+  "bars": 10794,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:45:00"
+ },
+ {
+  "symbol": "MARA",
+  "timeframe": "5min",
+  "bars": 32369,
+  "asset_class": "small_cap_liquid",
+  "first": "2024-01-02 09:30:00",
+  "last": "2025-08-29 15:55:00"
+ },
+ {
+  "symbol": "BTCUSD",
+  "timeframe": "30min",
+  "bars": 29132,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:30:00"
+ },
+ {
+  "symbol": "BTCUSD",
+  "timeframe": "15min",
+  "bars": 58264,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:45:00"
+ },
+ {
+  "symbol": "BTCUSD",
+  "timeframe": "5min",
+  "bars": 174800,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:55:00"
+ },
+ {
+  "symbol": "ETHUSD",
+  "timeframe": "30min",
+  "bars": 29132,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:30:00"
+ },
+ {
+  "symbol": "ETHUSD",
+  "timeframe": "15min",
+  "bars": 58264,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:45:00"
+ },
+ {
+  "symbol": "ETHUSD",
+  "timeframe": "5min",
+  "bars": 174795,
+  "asset_class": "crypto",
+  "first": "2024-01-01 00:00:00",
+  "last": "2025-08-29 23:55:00"
+ }
+]

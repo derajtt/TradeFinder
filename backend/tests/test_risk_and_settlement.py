@@ -1,0 +1,130 @@
+"""Regression tests for the risk layer and the settlement partition."""
+import pytest
+
+from app.risk.engine import (build_trade_plan, circuit_breaker_state,
+                             dynamic_risk, portfolio_risk, size_position,
+                             RISK_DEFAULTS)
+from app.risk.qc import qc_check
+from app.risk.roadmap import build_roadmap
+from app.strategy.registry import MODELS
+
+
+def test_position_size_derives_from_stop_distance():
+    s = size_position(10000, 1.0, 50.0, 49.0, "long")
+    assert s["valid"] and s["quantity"] == 100
+    assert s["planned_loss"] == pytest.approx(100.0, abs=0.01)
+
+
+def test_wider_stop_gives_smaller_position_same_risk():
+    tight = size_position(10000, 1.0, 50.0, 49.5, "long")
+    wide = size_position(10000, 1.0, 50.0, 48.0, "long")
+    assert tight["quantity"] > wide["quantity"]
+    assert tight["planned_loss"] == pytest.approx(wide["planned_loss"], abs=1.0)
+
+
+def test_stop_on_wrong_side_is_rejected():
+    assert size_position(10000, 1.0, 50.0, 51.0, "long")["valid"] is False
+    assert size_position(10000, 1.0, 50.0, 49.0, "short")["valid"] is False
+
+
+def test_risk_never_exceeds_configured_max():
+    d = dynamic_risk(5.0, [], max_pct=2.0)
+    assert d["adjusted_pct"] == 2.0
+
+
+def test_modifiers_only_reduce():
+    d = dynamic_risk(1.0, ["high_volatility", "wide_spread"], 2.0)
+    assert d["adjusted_pct"] < 1.0 and d["reduced"]
+
+
+def test_reward_gate_blocks_low_rr_and_explains():
+    p = build_trade_plan({"symbol": "X", "direction": "long", "entry": 100,
+                          "stop": 99, "targets": [{"name": "TP1", "price": 100.8}]},
+                         {"account_equity": 10000})
+    assert p["actionable"] is False
+    assert p["status"] == "NO_TRADE_REWARD_TOO_LOW"
+    assert p["available_r"] < p["required_r"]
+
+
+def test_portfolio_ceiling_blocks_new_risk():
+    open_pos = [{"symbol": "AAA", "open_risk_dollars": 250, "direction": "long"}]
+    p = build_trade_plan({"symbol": "X", "direction": "long", "entry": 100,
+                          "stop": 98, "targets": [{"name": "TP1", "price": 106}]},
+                         {"account_equity": 10000, "max_total_open_risk_pct": 3.0},
+                         open_positions=open_pos)
+    assert p["actionable"] is True          # 2.5% used of a 3% ceiling
+    assert p["risk"]["applied_risk_pct"] <= 0.5 + 1e-9   # trimmed to the headroom
+    open_pos.append({"symbol": "BBB", "open_risk_dollars": 60, "direction": "long"})
+    p2 = build_trade_plan({"symbol": "X", "direction": "long", "entry": 100,
+                           "stop": 98, "targets": [{"name": "TP1", "price": 106}]},
+                          {"account_equity": 10000, "max_total_open_risk_pct": 3.0},
+                          open_positions=open_pos)
+    assert p2["actionable"] is False and p2["status"] == "NO_TRADE_PORTFOLIO_RISK"
+
+
+def test_correlated_exposure_trims_risk():
+    """Two semis longs already open: a third correlated long is not a third
+    independent risk, so the allowance is trimmed to what is left in the group."""
+    open_pos = [{"symbol": "NVDA", "open_risk_dollars": 75, "direction": "long"},
+                {"symbol": "AMD", "open_risk_dollars": 75, "direction": "long"}]
+    p = build_trade_plan({"symbol": "SMH", "direction": "long", "entry": 100,
+                          "stop": 98, "targets": [{"name": "TP1", "price": 106}]},
+                         {"account_equity": 10000}, open_positions=open_pos)
+    assert p["actionable"] is True
+    assert p["risk"]["applied_risk_pct"] < 1.0
+    assert p["risk"]["reduction_reasons"]
+
+
+def test_full_correlation_group_blocks_the_trade():
+    open_pos = [{"symbol": "NVDA", "open_risk_dollars": 100, "direction": "long"},
+                {"symbol": "AMD", "open_risk_dollars": 100, "direction": "long"}]
+    p = build_trade_plan({"symbol": "SMH", "direction": "long", "entry": 100,
+                          "stop": 98, "targets": [{"name": "TP1", "price": 106}]},
+                         {"account_equity": 10000}, open_positions=open_pos)
+    assert p["actionable"] is False and p["status"] == "NO_TRADE_CORRELATION"
+
+
+def test_daily_loss_limit_pauses_entries_but_not_recording():
+    cb = circuit_breaker_state(RISK_DEFAULTS, daily_pnl_pct=-3.5)
+    assert cb["paused"] is True
+    assert cb["paper_recording"] is True     # research data must keep flowing
+
+
+def test_qc_rejects_inverted_plan():
+    bad = {"direction": "long", "entry": 100, "stop": 101,
+           "targets": [{"name": "TP1", "price": 99}], "risk": {"quantity": 5}}
+    r = qc_check(bad)
+    assert r["passed"] is False and len(r["errors"]) >= 2
+
+
+def test_qc_rejects_stale_data():
+    ok = {"direction": "long", "entry": 100, "stop": 99,
+          "targets": [{"name": "TP1", "price": 103}], "risk": {"quantity": 5}}
+    assert qc_check(ok, data_age_s=60)["passed"] is True
+    assert qc_check(ok, data_age_s=5000)["passed"] is False
+
+
+def test_roadmap_says_do_not_chase_above_no_chase_level():
+    p = build_trade_plan({"symbol": "NVDA", "direction": "long", "entry": 139.40,
+                          "stop": 137.90, "score": 87,
+                          "entry_zone": {"ideal": (139.2, 139.55),
+                                         "acceptable": (139.05, 139.7),
+                                         "no_chase": 140.05},
+                          "targets": [{"name": "TP1", "price": 141.65},
+                                      {"name": "TP2", "price": 143.2}]},
+                         {"account_equity": 10000})
+    assert build_roadmap(p, current_price=140.9)["now"]["action"] == "AVOID"
+    assert build_roadmap(p, current_price=139.3)["now"]["action"] == "ENTER"
+
+
+def test_settlement_engines_partition_open_positions():
+    """Every profile must be settled by exactly one engine — never both, never
+    neither. The two engines are defined as set complements over the registry."""
+    from app.strategy import paper, platform
+    import inspect
+    plat_src = inspect.getsource(platform.settle_positions)
+    paper_src = inspect.getsource(paper.update_positions)
+    assert "MODELS.keys()" in plat_src and ".in_(" in plat_src
+    assert "MODELS.keys()" in paper_src and ".notin_(" in paper_src
+    for pid in ["primary", "accuracy", "aggressive", "penny", "insight_t45"]:
+        assert pid not in MODELS, f"{pid} must not be a registry id"

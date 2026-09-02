@@ -9,6 +9,7 @@ Discovery failures never touch existing signals; tracking and discovery fail ind
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -63,6 +64,10 @@ class Scheduler:
         self._first_seen: Dict[str, str] = {}   # f"{sym}:{date}" -> iso ts
         self.mctx = None            # shared multi-model market context
         self._daily_models_ran: str = ""
+        self._weekly_models_ran: str = ""
+        self._monthly_models_ran: str = ""
+        # per-model liveness telemetry: model_id -> heartbeat dict
+        self.model_health: Dict[str, Dict[str, Any]] = {}
         self.last_regime: Dict[str, Any] = {"state": "uncertain",
                                             "why": "not yet evaluated"}
         self.task: Optional[asyncio.Task] = None
@@ -126,20 +131,33 @@ class Scheduler:
                 if phase in ("prep", "premarket"):
                     await self._discovery_cycle(settings, phase)
                     await self._tracking_cycle(settings, finalize=False)
+                    if self.state["cycles"] % 5 == 0:
+                        await self._reversion_cycle(settings, phase)
                 elif phase == "regular":
                     await self._tracking_cycle(settings, finalize=False)
                     if self.state["cycles"] % 5 == 0:
                         await self._discovery_cycle(settings, phase)  # keep candidate table fresh
                     if self.state["cycles"] % 3 == 0:
                         await self._models_cycle(settings, phase)
+                    if self.state["cycles"] % 4 == 0:
+                        await self._reversion_cycle(settings, phase)
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
                     if self.state["cycles"] % 10 == 0:
                         await self._models_cycle(settings, phase)  # crypto lane
+                    if self.state["cycles"] % 5 == 0:
+                        await self._reversion_cycle(settings, phase)
                     await self._nightly_research(settings)
                     interval = max(interval, 300)
-                elif self.state["cycles"] % 10 == 0 and phase == "closed":
-                    await self._models_cycle(settings, phase)      # crypto is 24/7
+                elif phase == "closed":
+                    # Crypto trades 24/7, so its positions must also be settled
+                    # 24/7 — previously nothing settled on this branch and
+                    # overnight/weekend crypto positions hung open indefinitely.
+                    await self._tracking_cycle(settings, finalize=False)
+                    if self.state["cycles"] % 10 == 0:
+                        await self._models_cycle(settings, phase)
+                    if self.state["cycles"] % 5 == 0:
+                        await self._reversion_cycle(settings, phase)
                     nxt = next_scan_start()
                     self.state["next_run_at"] = nxt.isoformat()
                 elif True:
@@ -151,6 +169,7 @@ class Scheduler:
                 self.state["cycles"] += 1
                 self.state["last_cycle_at"] = now_utc().isoformat()
                 await self._flush_provider_logs()
+                await self._persist_heartbeats()
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -811,6 +830,20 @@ class Scheduler:
                         shadow_until=now_utc() + timedelta(hours=8)))
                     await db.commit()
 
+    async def _load_daily_for(self, ctx, symbols, cap: int = 25):
+        """Fetch daily bars for symbols an engine has become eligible for.
+        Capped so a wide EDGAR day cannot blow the shared API budget."""
+        out = []
+        for sym in symbols[:cap]:
+            if sym not in ctx["bars_daily"]:
+                try:
+                    ctx["bars_daily"][sym] = await self.mctx.daily(sym)
+                except Exception:
+                    ctx["bars_daily"][sym] = []
+            if ctx["bars_daily"].get(sym):
+                out.append(sym)
+        return out
+
     async def _models_cycle(self, settings, phase):
         """One pass of the 14 non-scalper model engines over the shared bounded
         universes. Cadence: intraday engines each call (RTH; crypto 24/7),
@@ -819,13 +852,27 @@ class Scheduler:
             self.mctx = mplat.ModelContext(self.ctx.fmp)
         t = now_et()
         today = str(t.date())
-        run_daily = (self._daily_models_ran != today and
-                     (t.hour > 15 or phase in ("afterhours", "closed")))
+        trading_day = is_trading_day(t.date())
+        # Daily/weekly/monthly engines rebalance once per *trading* day, after
+        # the close. Without the trading-day test they re-ran on Saturday and
+        # Sunday against Friday's unchanged bars and opened a duplicate position
+        # each pass, debiting the ledger every time.
+        run_daily = (self._daily_models_ran != today and trading_day
+                     and phase in ("afterhours", "closed"))
+        iso_year, iso_week, _ = t.isocalendar()
+        week_key, month_key = f"{iso_year}-W{iso_week}", f"{t.year}-{t.month:02d}"
+        run_weekly = run_daily and self._weekly_models_ran != week_key
+        run_monthly = run_daily and self._monthly_models_ran != month_key
         # shared context
         ctx: Dict[str, Any] = {"bars_daily": {}, "bars_5m": {}}
         stock_syms = list(ETF_UNIVERSE)
         crypto_syms = list(CRYPTO_UNIVERSE)
-        for s in stock_syms + crypto_syms:
+        # Both legs of every pair need daily bars. GLD and XOP are not in
+        # ETF_UNIVERSE, so ("GDX","GLD") and ("XLE","XOP") could never resolve
+        # and two of the five pairs were permanently dead.
+        pair_syms = sorted({leg for pair in PAIRS for leg in pair}
+                           - set(stock_syms))
+        for s in stock_syms + crypto_syms + pair_syms:
             ctx["bars_daily"][s] = await self.mctx.daily(s)
         ctx["spy_daily"] = ctx["bars_daily"].get("SPY") or []
         self.last_regime = regime_fn(ctx)
@@ -852,30 +899,84 @@ class Scheduler:
         else:
             ctx["insider_clusters"] = {}
             ctx["fundamentals"] = {}
-        profiles_cfg = get_profiles(settings)
+        # Model settings live in their own store keyed by registry id. They used
+        # to be read from the scalper profile table, which never contains a
+        # model id, so overrides and the enable/disable switch did nothing.
+        model_cfg = settings.get("model_settings") or {}
+        if isinstance(model_cfg, str):
+            try:
+                model_cfg = json.loads(model_cfg)
+            except (ValueError, TypeError):
+                model_cfg = {}
         fired = 0
         for mid, meta in MODELS.items():
             if meta["engine"] == "scalper" or not meta.get("build"):
                 continue
-            pcfg = profiles_cfg.get(mid) or {}
+            if meta.get("own_worker"):
+                continue      # runs its own cycle and reports its own heartbeat
+            pcfg = model_cfg.get(mid) or {}
+            hb = self.model_health.setdefault(mid, {})
+            hb.update({"model_id": mid, "name": meta["name"],
+                       "engine": meta["engine"],
+                       "enabled": pcfg.get("enabled") is not False})
             if pcfg.get("enabled") is False:
+                hb.update({"status": "DISABLED", "skip_reason": "disabled in settings",
+                           "last_seen_at": now_utc().isoformat()})
                 continue
             eng = ENGINES.get(meta["engine"])
             if eng is None:
+                hb.update({"status": "ERROR", "skip_reason":
+                           f"no engine implementation named '{meta['engine']}'",
+                           "last_seen_at": now_utc().isoformat()})
                 continue
             allowed = REGIME_ALLOW.get(meta["engine"], {"trend", "range",
                                                         "uncertain"})
             if reg_state not in allowed:
+                hb.update({"status": "WAITING", "skip_reason":
+                           f"regime '{reg_state}' not in this model's allowed set "
+                           f"{sorted(allowed)}",
+                           "last_seen_at": now_utc().isoformat()})
                 continue
             cadence = meta.get("cadence", "intraday")
             if cadence == "intraday" and not (intraday_ok or
                                               "crypto" in meta["asset_classes"]):
+                hb.update({"status": "WAITING",
+                           "skip_reason": "intraday model, market is not in "
+                                          "regular trading hours",
+                           "last_seen_at": now_utc().isoformat()})
                 continue
-            if cadence in ("daily", "weekly", "monthly") and not run_daily:
+            # Each cadence now has its own gate. Previously weekly and monthly
+            # both fell into the daily branch and rebalanced every single day.
+            def _waiting(why):
+                hb.update({"status": "WAITING", "skip_reason": why,
+                           "last_seen_at": now_utc().isoformat()})
+            if cadence == "daily" and not run_daily:
+                _waiting("daily rebalance already ran for this trading day")
+                continue
+            if cadence == "weekly" and not run_weekly:
+                _waiting(f"weekly rebalance already ran for {week_key}")
+                continue
+            if cadence == "monthly" and not run_monthly:
+                _waiting(f"monthly rebalance already ran for {month_key}")
+                continue
+            if cadence == "premarket":
+                _waiting("premarket cadence is owned by the scalper discovery cycle")
                 continue
             cfg = (pcfg.get("overrides") or {})
             if meta["engine"] == "pairs":
                 symbols = [f"{a}|{b}" for a, b in PAIRS]
+            elif meta["engine"] == "insider":
+                # Form-4 purchase clusters are market-wide. Feeding this engine
+                # the 20-symbol ETF universe meant the intersection was almost
+                # always empty and the model could never fire.
+                symbols = await self._load_daily_for(
+                    ctx, [x for x in (ctx.get("insider_clusters") or {})
+                          if x not in crypto_syms], cap=25)
+            elif meta["engine"] == "earnings":
+                # Same problem: only companies that actually reported can drift.
+                symbols = await self._load_daily_for(
+                    ctx, [x for x in (ctx.get("earnings") or {})
+                          if x not in crypto_syms], cap=25)
             elif meta["asset_classes"] == ["crypto"]:
                 symbols = crypto_syms
             elif "crypto" in meta["asset_classes"]:
@@ -883,10 +984,16 @@ class Scheduler:
                            else []) + crypto_syms
             else:
                 symbols = stock_syms if (intraday_ok or cadence != "intraday") else []
+            scanned = with_data = errors = model_fired = 0
             for sym in symbols:
+                scanned += 1
+                base_sym = sym.split("|")[0]
+                if (ctx["bars_daily"].get(base_sym) or ctx["bars_5m"].get(base_sym)):
+                    with_data += 1
                 try:
                     v = eng(ctx, sym, cfg)
                 except Exception as e:
+                    errors += 1
                     await self._health("warn", f"model:{mid}",
                                        f"{sym}: {type(e).__name__}: {e}")
                     continue
@@ -899,16 +1006,232 @@ class Scheduler:
                                                       settings)
                 if sig:
                     fired += 1
+                    model_fired += 1
                     await broadcaster.publish("buy_signal", {
                         "symbol": base, "price": v["entry"], "type": "buy",
                         "model": mid, "score": v["score"],
                         "signal_uid": sig.signal_uid,
                         "initiated_at": sig.initiated_at.isoformat()})
+            hb.update({
+                "status": "LIVE" if with_data else ("NO_DATA" if scanned else "WAITING"),
+                "skip_reason": None if with_data else
+                               ("no symbols matched this model's universe"
+                                if not scanned else
+                                f"{scanned} symbol(s) matched but none had usable bars"),
+                "last_scan_at": now_utc().isoformat(),
+                "last_seen_at": now_utc().isoformat(),
+                "symbols_scanned": scanned, "symbols_with_data": with_data,
+                "errors": errors, "signals_this_pass": model_fired,
+                "signals_today": hb.get("signals_today", 0) + model_fired
+                                 if hb.get("day") == today else model_fired,
+                "day": today, "cadence": cadence,
+            })
         if run_daily:
             self._daily_models_ran = today
+        if run_weekly:
+            self._weekly_models_ran = week_key
+        if run_monthly:
+            self._monthly_models_ran = month_key
         if fired:
             await self._health("info", "models", f"{fired} model signal(s) fired "
                                f"(regime {reg_state})")
+
+    async def _reversion_cycle(self, settings, phase):
+        """Extreme Reversion (EXTREME_BB_RSI): its own multi-timeframe worker.
+
+        Scans closed bars only, routes every confirmed setup through the
+        platform risk layer, and advances open signals against real bars so
+        stops and targets are obeyed literally.
+        """
+        from .strategy import reversion as REV
+        from .strategy import reversion_live as RL
+
+        hb = self.model_health.setdefault("extreme_reversion", {})
+        hb.update({"model_id": "extreme_reversion", "name": "Extreme Reversion",
+                   "engine": "extreme_bb_rsi", "enabled": True,
+                   "cadence": "intraday"})
+        cfg = settings.get("model_settings") or {}
+        if isinstance(cfg, str):
+            try:
+                cfg = json.loads(cfg)
+            except (ValueError, TypeError):
+                cfg = {}
+        mcfg = cfg.get("extreme_reversion") or {}
+        if mcfg.get("enabled") is False:
+            hb.update({"status": "DISABLED", "skip_reason": "disabled in settings",
+                       "last_seen_at": now_utc().isoformat()})
+            return
+
+        variant = mcfg.get("variant", "adaptive")
+        params = REV.params_for(variant, mcfg.get("overrides") or {})
+        risk_settings = await self._risk_settings(settings)
+        today = str(now_et().date())
+
+        # keep live signals honest first, then look for new ones
+        try:
+            track = await RL.update_open_signals(self.ctx.fmp)
+        except Exception as e:
+            track = {}
+            await self._health("warn", "reversion", f"tracking: {type(e).__name__}: {e}")
+
+        rth = phase == "regular"
+        syms = ([(x, "stocks") for x in RL.STOCK_UNIVERSE] if rth else []) +                [(x, "crypto") for x in RL.CRYPTO_UNIVERSE]
+        tfs = list(RL.TIMEFRAMES)
+        if self.state["cycles"] % 3 == 0:
+            tfs = [RL.FAST_TIMEFRAME] + tfs
+
+        scanned = with_data = fired = errors = no_trade = 0
+        breaker = await self._breaker_state(risk_settings)
+        open_pos = await self._open_risk_rows()
+        stats = await self._reversion_stats(variant)
+        for sym, klass in syms:
+            for tf in tfs:
+                if tf == RL.FAST_TIMEFRAME and sym not in RL.FAST_SYMBOLS:
+                    continue
+                scanned += 1
+                try:
+                    sigs, nbars = await RL.scan_symbol(self.ctx.fmp, sym, tf,
+                                                       klass, params)
+                except Exception as e:
+                    errors += 1
+                    await self._health("warn", "reversion",
+                                       f"{sym} {tf}: {type(e).__name__}: {e}")
+                    continue
+                if nbars >= RL.MIN_BARS:
+                    with_data += 1
+                for sig in sigs:
+                    if sig.get("status") == "CONFIRMED":
+                        row = await RL.persist_signal(sig, params, risk_settings,
+                                                      open_pos, stats, breaker)
+                        if row:
+                            fired += 1
+                            await broadcaster.publish("reversion_signal", {
+                                "symbol": row.symbol, "timeframe": row.timeframe,
+                                "direction": row.direction,
+                                "score": row.signal_score,
+                                "status": row.status,
+                                "signal_uid": row.signal_uid})
+                    elif sig.get("status") in ("NO_TRADE", "BELOW_THRESHOLD"):
+                        no_trade += 1
+
+        hb.update({
+            "status": "PAPER_LIVE" if with_data else "NO_DATA",
+            "skip_reason": None if with_data else
+                           "no series returned enough closed bars to evaluate",
+            "last_scan_at": now_utc().isoformat(),
+            "last_seen_at": now_utc().isoformat(),
+            "symbols_scanned": scanned, "symbols_with_data": with_data,
+            "errors": errors, "signals_this_pass": fired,
+            "signals_today": (hb.get("signals_today", 0) + fired
+                              if hb.get("day") == today else fired),
+            "day": today, "variant": variant,
+            "rejected_this_pass": no_trade, "tracking": track,
+        })
+        if fired:
+            await self._health("info", "reversion",
+                               f"{fired} Extreme Reversion signal(s) ({variant})")
+
+    async def _risk_settings(self, settings):
+        from .risk.engine import RISK_DEFAULTS
+        raw = settings.get("risk_settings") or {}
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (ValueError, TypeError):
+                raw = {}
+        return {**RISK_DEFAULTS, **raw}
+
+    async def _open_risk_rows(self):
+        """Open paper positions expressed as risk dollars for portfolio limits."""
+        from .models import PaperPosition
+        try:
+            async with SessionLocal() as db:
+                rows = (await db.execute(select(PaperPosition).where(
+                    PaperPosition.status == "open"))).scalars().all()
+                out = []
+                for p in rows:
+                    risk_unit = abs((p.entry_fill or 0) - (p.stop or 0))
+                    qty = (p.size_usd / p.entry_fill) if p.entry_fill else 0
+                    out.append({"symbol": p.symbol, "direction": "long",
+                                "open_risk_dollars": round(risk_unit * qty
+                                                           * (p.remaining_frac or 1), 2)})
+                return out
+        except Exception:
+            return []
+
+    async def _breaker_state(self, risk_settings):
+        from .risk.engine import circuit_breaker_state
+        from .models import PaperAccount
+        try:
+            async with SessionLocal() as db:
+                accs = (await db.execute(select(PaperAccount))).scalars().all()
+            dd = max((a.max_drawdown_pct or 0) for a in accs) if accs else 0.0
+            return circuit_breaker_state(risk_settings, drawdown_pct=dd)
+        except Exception:
+            return circuit_breaker_state(risk_settings)
+
+    async def _reversion_stats(self, variant):
+        """Observed forward-paper record for this variant, for the plan's
+        expected-value block. Returns None below the reporting minimum."""
+        from .models import ReversionSignal
+        try:
+            async with SessionLocal() as db:
+                rows = (await db.execute(select(ReversionSignal).where(
+                    ReversionSignal.variant == variant,
+                    ReversionSignal.status == "CLOSED"))).scalars().all()
+            res = [r for r in rows if r.win_loss in ("WIN", "LOSS", "BREAKEVEN",
+                                                     "AMBIGUOUS")]
+            if len(res) < 30:
+                return None
+            wins = [r for r in res if r.win_loss == "WIN"]
+            losses = [r for r in res if r.win_loss == "LOSS"]
+            return {
+                "basis": "paper", "trades": len(res),
+                "sample": "EARLY" if len(res) < 100 else "MODERATE SAMPLE",
+                "win_rate": round(100 * len(wins) / len(res), 2),
+                "avg_win_pct": round(sum(r.net_return_pct or 0 for r in wins)
+                                     / max(1, len(wins)), 3),
+                "avg_loss_pct": round(abs(sum(r.net_return_pct or 0 for r in losses))
+                                      / max(1, len(losses)), 3),
+            }
+        except Exception:
+            return None
+
+    async def _persist_heartbeats(self):
+        """Mirror in-memory heartbeats to the database so status survives a
+        restart and a dead worker reads as OFFLINE instead of frozen-but-live."""
+        from .models import StrategyHeartbeat
+        if not self.model_health:
+            return
+        try:
+            async with SessionLocal() as db:
+                existing = {h.strategy_id: h for h in (await db.execute(
+                    select(StrategyHeartbeat))).scalars().all()}
+                for mid, hb in self.model_health.items():
+                    row = existing.get(mid)
+                    if row is None:
+                        row = StrategyHeartbeat(strategy_id=mid)
+                        db.add(row)
+                    row.name = hb.get("name", mid)
+                    row.status = (hb.get("status") or "UNKNOWN")[:20]
+                    row.last_heartbeat_at = now_utc()
+                    if hb.get("last_scan_at"):
+                        try:
+                            row.last_scan_at = datetime.fromisoformat(hb["last_scan_at"])
+                        except (TypeError, ValueError):
+                            pass
+                    row.skip_reason = (hb.get("skip_reason") or "")[:256]
+                    row.symbols_scanned = int(hb.get("symbols_scanned") or 0)
+                    row.symbols_with_data = int(hb.get("symbols_with_data") or 0)
+                    row.signals_today = int(hb.get("signals_today") or 0)
+                    row.errors_today = int(hb.get("errors") or 0)
+                    row.day = hb.get("day") or ""
+                    row.detail = {k: v for k, v in hb.items()
+                                  if k in ("variant", "cadence", "engine",
+                                           "rejected_this_pass", "tracking")}
+                await db.commit()
+        except Exception as e:
+            log.warning("heartbeat persist failed: %s", e)
 
     _last_snap = 0.0
 

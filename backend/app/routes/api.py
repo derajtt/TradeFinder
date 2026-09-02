@@ -275,6 +275,71 @@ async def signals_csv(db: AsyncSession = Depends(get_session)):
                                       "attachment; filename=signals.csv"})
 
 
+
+async def _roadmap_for_signal(sig, db, pos=None) -> Dict[str, Any]:
+    """Turn any strategy's signal into the same beginner-readable trade plan.
+
+    Applies to every strategy that uses the standard risk model. The scalper and
+    any WINGED strategy keep their own execution rules — their levels are shown
+    through the identical UI, but the layer never overrides them.
+    """
+    from ..risk.engine import (RISK_DEFAULTS, build_trade_plan,
+                               circuit_breaker_state)
+    from ..risk.roadmap import build_roadmap
+    from ..strategy.registry import RISK_MODELS
+
+    profile = getattr(sig, "profile", None) or "primary"
+    setup = ((sig.score_snapshot or {}).get("v2") or {}).get("setup") or {}
+    stop = (pos.stop if pos else None) or setup.get("stop")
+    t1 = (pos.target1 if pos else None) or setup.get("target1")
+    t2 = (pos.target2 if pos else None) or setup.get("target2")
+    entry = sig.sim_fill_price or sig.buy_signal_price
+    if not entry or not stop:
+        return {}
+
+    targets = [{"name": "TP1", "price": t1}] if t1 else []
+    if t2:
+        targets.append({"name": "TP2", "price": t2})
+    if not targets:
+        return {}
+
+    cfg = await _risk_cfg(db)
+    risk_model = RISK_MODELS.get(profile, "standard")
+    exempt = risk_model != "standard"
+    if exempt:
+        # Specialised models keep their own sizing rules; the layer still shows
+        # the numbers so the card reads identically everywhere.
+        cfg = {**cfg, "min_rr": 0.5}
+
+    plan = build_trade_plan(
+        {"symbol": sig.symbol, "direction": "long", "entry": entry, "stop": stop,
+         "targets": targets, "score": (sig.score_snapshot or {}).get("score"),
+         "stop_basis": setup.get("stop_basis") or "strategy invalidation level",
+         "invalidation": f"price closes below {stop:.4f}"},
+        cfg, breaker=circuit_breaker_state(cfg), exempt=exempt)
+    filled = pos is not None and pos.status == "open"
+    hit = {e.get("e", "").replace("_partial", "").upper()
+           for e in ((pos.events if pos else None) or [])
+           if "target" in str(e.get("e", ""))}
+    return build_roadmap(plan, current_price=sig.current_live_price,
+                         filled=filled, targets_hit=list(hit),
+                         stage=getattr(sig, "lifecycle", "") or "CONFIRMED",
+                         strategy_label=profile.replace("_", " ").title())
+
+
+async def _risk_cfg(db) -> Dict[str, Any]:
+    from ..risk.engine import RISK_DEFAULTS
+    import json as _json
+    st = await _get_settings(db)
+    raw = st.get("risk_settings") or {}
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            raw = {}
+    return {**RISK_DEFAULTS, **raw}
+
+
 @router.get("/signals/{signal_uid}")
 async def signal_detail(signal_uid: str, db: AsyncSession = Depends(get_session)):
     s = (await db.execute(select(BuySignal).where(BuySignal.signal_uid == signal_uid))
@@ -297,6 +362,9 @@ async def signal_detail(signal_uid: str, db: AsyncSession = Depends(get_session)
         "checkpoints": {c.label: {"price": c.price, "pct": c.pct_from_signal} for c in cps},
         "events": [{"ts": e.ts_utc.isoformat(), "type": e.event_type, "detail": e.detail}
                    for e in events],
+        "roadmap": await _roadmap_for_signal(
+            s, db, (await db.execute(select(PaperPosition).where(
+                PaperPosition.signal_id == s.id))).scalars().first()),
         **metrics_with_outcome(s, await _get_settings(db)),
     }
 
@@ -574,6 +642,16 @@ async def backtest_report(db: AsyncSession = Depends(get_session)):
             "kind": job.kind, "config_hash": job.config_hash, "result": job.result}
 
 
+# The premarket scalper records positions under profile ids ("primary" and the
+# challenger profiles), not under its registry id, so its $10,000 ledger lives
+# under "primary". Alias it rather than showing a permanently untouched card.
+LEDGER_ALIAS = {"premarket_scalper": "primary"}
+
+
+def _acct_for(accounts, mid):
+    return accounts.get(mid) or accounts.get(LEDGER_ALIAS.get(mid, ""), None)
+
+
 @router.get("/models")
 async def models_list(request: Request, db: AsyncSession = Depends(get_session)):
     """Registry + per-model account, signal counts, and enablement."""
@@ -592,7 +670,7 @@ async def models_list(request: Request, db: AsyncSession = Depends(get_session))
     sched = shared.get("scheduler")
     out = []
     for mid, meta in MODELS.items():
-        acc = accounts.get(mid)
+        acc = _acct_for(accounts, mid)
         pcfg = profs.get(mid) or {}
         out.append({
             "id": mid, **{k: meta.get(k) for k in
@@ -611,7 +689,9 @@ async def models_list(request: Request, db: AsyncSession = Depends(get_session))
                                      "realized_pnl": 0, "max_drawdown_pct": 0,
                                      "trades_closed": 0, "wins": 0,
                                      "return_pct": 0.0}),
-            "signals": sig_counts.get(mid, {}),
+            "signals": (sig_counts.get(mid)
+                        or sig_counts.get(LEDGER_ALIAS.get(mid, ""), {})),
+            "ledger_profile": LEDGER_ALIAS.get(mid, mid),
         })
     return {"models": out, "research_only": RESEARCH_ONLY,
             "regime": (getattr(sched, "last_regime", None) if sched else None),
@@ -625,7 +705,7 @@ async def competition(db: AsyncSession = Depends(get_session)):
             (await db.execute(select(PaperAccount))).scalars().all()}
     cards = []
     for mid, meta in MODELS.items():
-        a = accs.get(mid)
+        a = _acct_for(accs, mid)
         wr = (a.wins / a.trades_closed) if a and a.trades_closed else None
         cards.append({"model_id": mid,
                       "name": meta.get("name", mid),
@@ -677,10 +757,13 @@ async def chart_bars(symbol: str, tf: str = "5min", request: Request = None,
         raise HTTPException(400, "tf must be 5min|1hour|daily")
     try:
         if tf == "daily":
+            from datetime import date as _d, timedelta as _t
+            _today = _d.today()
             data = await ctx.fmp._get("historical-price-eod/full",
-                                      {"symbol": symbol, "from": "2024-01-01",
-                                       "to": "2027-01-01"}, cache_ttl=1800,
-                                      endpoint_name="chart-eod")
+                                      {"symbol": symbol,
+                                       "from": str(_today - _t(days=900)),
+                                       "to": str(_today + _t(days=1))},
+                                      cache_ttl=1800, endpoint_name="chart-eod")
             rows = sorted(data or [], key=lambda r: r.get("date") or "")
             bars = [{"time": r["date"], "open": r["open"], "high": r["high"],
                      "low": r["low"], "close": r["close"],

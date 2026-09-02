@@ -39,9 +39,13 @@ class ModelContext:
         if hit and _time.monotonic() - hit[0] < 3600:
             return hit[1]
         try:
+            # Rolling window: a fixed end-date literal would silently start
+            # serving frozen bars once that date passed.
+            _today = now_et().date()
             data = await self.fmp._get("historical-price-eod/full",
-                                       {"symbol": sym, "from": "2025-06-01",
-                                        "to": "2027-01-01"},
+                                       {"symbol": sym,
+                                        "from": str(_today - timedelta(days=420)),
+                                        "to": str(_today + timedelta(days=1))},
                                        cache_ttl=1800, endpoint_name="eod-full")
         except Exception:
             data = []
@@ -81,7 +85,7 @@ class ModelContext:
         return bars
 
     async def earnings_today(self) -> Dict[str, dict]:
-        if _time.monotonic() - self._earnings[0] < 3600:
+        if self._earnings[0] and _time.monotonic() - self._earnings[0] < 3600:
             return self._earnings[1]
         d0 = str((now_et() - timedelta(days=1)).date())
         d1 = str(now_et().date())
@@ -113,7 +117,7 @@ class ModelContext:
         -> fetch each filing (bounded) and count distinct owners with real
         open-market purchases (transaction code P, acquired). Sales, grants and
         exercises are excluded — a Form 4 is never assumed to be a buy."""
-        if _time.monotonic() - self._insiders[0] < 6 * 3600:
+        if self._insiders[0] and _time.monotonic() - self._insiders[0] < 6 * 3600:
             return self._insiders[1]
         out: Dict[str, dict] = {}
         try:
@@ -227,10 +231,9 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
             evidence_snapshot={"model": model_id, "engine_evidence":
                                verdict["evidence"],
                                "features": {"quote_price": quote_price}},
-            signal_type="buy")
+            signal_type="buy", fingerprint=fp)
         if not sig:
             return None
-        sig.catalyst_fingerprint = fp
         sig.profile = model_id
         sig.lifecycle = "ACTIONABLE_BUY"
         sig.versions = VERSIONS
@@ -261,9 +264,14 @@ async def settle_positions(db, quotes: Dict[str, dict],
     T2 close, and holding-based time exits. Credits the model's ledger."""
     out = []
     m_now = now_et().hour * 60 + now_et().minute
+    # Model-fleet profiles ONLY, keyed off the registry. strategy.paper owns
+    # everything NOT in the registry (the scalper profiles), so the two engines
+    # partition open positions exactly. The previous "profile != primary" test
+    # overlapped accuracy/aggressive/penny: they settled twice, double-counting
+    # partials and crediting cash that was never debited.
     open_pos = (await db.execute(select(PaperPosition).where(
         PaperPosition.status == "open",
-        PaperPosition.profile != "primary"))).scalars().all()
+        PaperPosition.profile.in_(list(MODELS.keys()))))).scalars().all()
     for pos in open_pos:
         q = quotes.get(pos.symbol)
         if not q or not q.get("price"):
@@ -274,13 +282,22 @@ async def settle_positions(db, quotes: Dict[str, dict],
         slip = {"slippage_pct": settings.get("slippage_pct", 0.4)}
         risk = max(1e-9, pos.entry_fill - (pos.stop or pos.entry_fill * 0.95))
 
+        pnl_delta = 0.0
+
         def close(price, reason, frac):
+            """Close `frac` of the position. Realised P&L is booked per slice at
+            the price that slice actually filled — computing it once at the end
+            from exit_fill would price earlier partials at the final fill."""
+            nonlocal pnl_delta
             fillp = simulate_sell_price(price, slip) or price
             r_piece = (fillp - pos.entry_fill) / risk * frac
             pos.realized_r = round(pos.realized_r + r_piece, 3)
             pos.remaining_frac = round(pos.remaining_frac - frac, 3)
+            pnl_delta += (fillp - pos.entry_fill) / pos.entry_fill * pos.size_usd * frac
             ev.append({"t": now_utc().isoformat(), "e": reason, "px": fillp,
-                       "frac": frac})
+                       "frac": frac,
+                       "pnl": round((fillp - pos.entry_fill) / pos.entry_fill
+                                    * pos.size_usd * frac, 2)})
             if pos.remaining_frac <= 0.001:
                 pos.status = "closed"
                 pos.exit_reason = reason
@@ -305,9 +322,8 @@ async def settle_positions(db, quotes: Dict[str, dict],
         if credited or pos.status == "closed":
             acc = await get_account(db, pos.profile)
             acc.cash = round(acc.cash + credited, 2)
+            acc.realized_pnl = round(acc.realized_pnl + pnl_delta, 2)
             if pos.status == "closed":
-                pnl = (pos.exit_fill - pos.entry_fill) / pos.entry_fill * pos.size_usd
-                acc.realized_pnl = round(acc.realized_pnl + pnl, 2)
                 acc.trades_closed += 1
                 if pos.realized_r > 0.05:
                     acc.wins += 1

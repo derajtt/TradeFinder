@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import BuySignal, PaperPosition, ShadowExit, SignalEvent
 from ..util.timeutil import ET, now_utc
+from .platform import get_account
+from .registry import MODELS
 from .execution import simulate_sell_price
 from .versions import STRATEGY_VERSION
 
@@ -42,10 +44,16 @@ async def open_position(db: AsyncSession, sig: BuySignal,
                         size_usd=PRIMARY_POLICY["size_usd"],
                         events=[{"t": now_utc().isoformat(), "e": "opened",
                                  "fill": sig.sim_fill_price}])
+    pos.profile = getattr(sig, "profile", None) or "primary"
     db.add(pos)
     for pol in SHADOW_POLICIES:
         db.add(ShadowExit(signal_id=sig.id, policy=pol))
     await db.flush()
+    # Debit the profile ledger. Without this the scalper had no ledger at all:
+    # its equity never moved, so its competition card sat at a permanent
+    # $10,000 with zero trades no matter how it actually performed.
+    acc = await get_account(db, pos.profile)
+    acc.cash = round(acc.cash - pos.size_usd, 2)
     db.add(SignalEvent(signal_id=sig.id, event_type="paper_opened",
                        detail={"fill": sig.sim_fill_price, "stop": pos.stop,
                                "t1": pos.target1, "t2": pos.target2}))
@@ -64,12 +72,13 @@ async def update_positions(db: AsyncSession, quotes: Dict[str, dict],
     updates = []
     now = now_utc()
     m_now = _et_min(now)
-    # scalper-strategy positions only — model-fleet positions are settled by
-    # strategy.platform.settle_positions with their own exits and ledgers
+    # Scalper-strategy positions = everything that is NOT a registry model id.
+    # strategy.platform.settle_positions owns the registry ids. Defining the two
+    # sets as complements means a newly added profile can never be settled by
+    # both engines, and can never be silently settled by neither.
     open_pos = (await db.execute(select(PaperPosition).where(
         PaperPosition.status == "open",
-        PaperPosition.profile.in_(("primary", "accuracy", "aggressive",
-                                   "penny"))))).scalars().all()
+        PaperPosition.profile.notin_(list(MODELS.keys()))))).scalars().all()
     for pos in open_pos:
         q = quotes.get(pos.symbol)
         if not q or not q.get("price"):
@@ -80,14 +89,21 @@ async def update_positions(db: AsyncSession, quotes: Dict[str, dict],
         ev = list(pos.events or [])
         risk = max(1e-9, pos.entry_fill - (pos.stop or pos.entry_fill * 0.95))
 
+        book = {"credited": 0.0, "pnl": 0.0}
+
         def sell(price, reason, frac):
+            """Each slice is booked at the price that slice filled at."""
             fillp = simulate_sell_price(price, {"slippage_pct":
                                                 settings.get("slippage_pct", 0.4)})
             r_piece = (fillp - pos.entry_fill) / risk * frac
             pos.realized_r = round(pos.realized_r + r_piece, 3)
             pos.remaining_frac = round(pos.remaining_frac - frac, 3)
+            slice_pnl = (fillp - pos.entry_fill) / pos.entry_fill * pos.size_usd * frac
+            book["credited"] += fillp * frac * (pos.size_usd / pos.entry_fill)
+            book["pnl"] += slice_pnl
             ev.append({"t": now.isoformat(), "e": reason, "px": fillp,
-                       "frac": frac, "r_piece": round(r_piece, 3)})
+                       "frac": frac, "r_piece": round(r_piece, 3),
+                       "pnl": round(slice_pnl, 2)})
             if pos.remaining_frac <= 0.001:
                 pos.status = "closed"
                 pos.exit_reason = reason
@@ -115,7 +131,16 @@ async def update_positions(db: AsyncSession, quotes: Dict[str, dict],
                 if m_now >= hh * 60 + mm:
                     sell(bid, "hard_time_exit", pos.remaining_frac)
         pos.events = ev
+        if book["credited"] or pos.status == "closed":
+            acc = await get_account(db, pos.profile or "primary")
+            acc.cash = round(acc.cash + book["credited"], 2)
+            acc.realized_pnl = round(acc.realized_pnl + book["pnl"], 2)
+            if pos.status == "closed":
+                acc.trades_closed += 1
+                if pos.realized_r > 0.05:
+                    acc.wins += 1
         updates.append({"symbol": pos.symbol, "status": pos.status,
+                        "profile": pos.profile,
                         "realized_r": pos.realized_r,
                         "remaining": pos.remaining_frac})
 

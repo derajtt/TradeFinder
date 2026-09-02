@@ -30,6 +30,16 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   return r.json();
 }
 
+export async function apiPostBody<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${API_BASE}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j as any)?.detail || `${path} -> HTTP ${r.status}`);
+  return j as T;
+}
+
 export async function apiPost<T>(path: string): Promise<T> {
   const r = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: authHeaders() });
   if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}`);

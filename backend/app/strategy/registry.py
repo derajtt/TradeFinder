@@ -149,6 +149,27 @@ MODELS.update({
     },
 })
 
+MODELS["extreme_reversion"] = {
+    "name": "Extreme Reversion", "engine": "extreme_bb_rsi", "build": True,
+    "asset_classes": ["stocks", "crypto"], "cadence": "intraday",
+    "horizon": "minutes–hours", "color": "#fb7185",
+    "risk_model": "standard", "code": "EXTREME_BB_RSI", "own_worker": True,
+    "edge": "Statistically extreme dislocation that has already begun to revert "
+            "— band re-entry plus an RSI turn, never a falling knife",
+    "universe": "liquid stocks, ETFs and major crypto",
+    "data_notes": "Runs its own multi-timeframe worker (15m/1h, plus 5m on a core "
+                  "set). 1-minute bars are not entitled on the current data plan, "
+                  "so 1m/3m are reported untested rather than assumed.",
+}
+
+# Which risk model governs each strategy. "standard" routes through the platform
+# risk layer (stop-derived sizing, R:R gate, portfolio ceilings). "scalper" and
+# "WINGED" keep their own tested execution rules; the layer still renders their
+# entry/stop/targets/size for display but never overrides them.
+RISK_MODELS = {mid: ("scalper" if meta.get("engine") == "scalper"
+                     else meta.get("risk_model", "standard"))
+               for mid, meta in MODELS.items()}
+
 REGIME_CONTROLLER = {
     "name": "Regime Controller", "engine": "regime",
     "note": "Overlay, not a competitor: classifies trend/range/event/high-risk/"

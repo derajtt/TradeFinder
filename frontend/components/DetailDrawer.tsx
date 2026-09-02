@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { API_BASE, API_KEY, apiGet } from '../lib/api';
 import { fmtCompact, fmtEt, fmtEtDate, fmtNum, fmtPct, fmtPrice } from '../lib/format';
 import { TERMS } from '../lib/terms';
+import TradeRoadmap from './TradeRoadmap';
 import Chart, { type Bar } from './Chart';
 import Score from './Score';
 import ScoringLegend from './ScoringLegend';
@@ -135,6 +136,14 @@ export default function DetailDrawer({ symbol, onClose }: { symbol: string; onCl
             </div>
             {d.watch.series.length > 2 && <ScoreSpark series={d.watch.series} />}
           </>)}
+
+          {story?.roadmap?.numbers || story?.roadmap?.no_trade_reason ? (<>
+            <div className="subhead">Your trade plan</div>
+            <TradeRoadmap rm={story.roadmap} symbol={symbol}
+              score={story.roadmap?.numbers ? undefined : undefined}
+              status={story.lifecycle || story.status}
+              plan={story.roadmap} />
+          </>) : null}
 
           <div className="subhead">Chart — accumulated 1-min bars</div>
           <Chart bars={d.bars} buyPrice={sig?.buy_price} vwap={feats.vwap}

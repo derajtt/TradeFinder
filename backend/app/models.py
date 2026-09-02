@@ -503,3 +503,140 @@ class MorningBrief(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     content: Mapped[dict] = mapped_column(JSON, default=dict)
     __table_args__ = (UniqueConstraint("session_date", "kind", name="uq_brief"),)
+
+
+class ReversionSignal(Base):
+    """EXTREME_BB_RSI signals. Immutable after confirmation: entry, stop and
+    targets are never rewritten. Management actions append to `events`."""
+    __tablename__ = "reversion_signals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signal_uid: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), default="extreme_reversion",
+                                             index=True)
+    strategy_version: Mapped[str] = mapped_column(String(16), default="1.0.0", index=True)
+    variant: Mapped[str] = mapped_column(String(32), default="adaptive", index=True)
+    dataset_run: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    cohort: Mapped[str] = mapped_column(String(16), default="paper", index=True)
+
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    asset_class: Mapped[str] = mapped_column(String(16), default="stocks")
+    timeframe: Mapped[str] = mapped_column(String(8), default="5min", index=True)
+    direction: Mapped[str] = mapped_column(String(8), default="long")
+
+    setup_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    bar_time: Mapped[int] = mapped_column(Integer, nullable=True)
+
+    signal_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    score_band: Mapped[str] = mapped_column(String(32), default="")
+    score_parts: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    entry_price: Mapped[float] = mapped_column(Float)
+    entry_zone_low: Mapped[float] = mapped_column(Float, nullable=True)
+    entry_zone_high: Mapped[float] = mapped_column(Float, nullable=True)
+    no_chase_price: Mapped[float] = mapped_column(Float, nullable=True)
+    stop_price: Mapped[float] = mapped_column(Float)
+    stop_basis: Mapped[str] = mapped_column(String(96), default="")
+    target_1: Mapped[float] = mapped_column(Float, nullable=True)
+    target_2: Mapped[float] = mapped_column(Float, nullable=True)
+    target_3: Mapped[float] = mapped_column(Float, nullable=True)
+    targets_json: Mapped[list] = mapped_column(JSON, default=list)
+
+    parameters_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    indicator_snapshot_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    market_regime: Mapped[str] = mapped_column(String(24), default="", index=True)
+    adx: Mapped[float] = mapped_column(Float, nullable=True)
+    atr: Mapped[float] = mapped_column(Float, nullable=True)
+    rsi: Mapped[float] = mapped_column(Float, nullable=True)
+    rsi_extreme: Mapped[float] = mapped_column(Float, nullable=True)
+    bb_basis: Mapped[float] = mapped_column(Float, nullable=True)
+    bb_upper: Mapped[float] = mapped_column(Float, nullable=True)
+    bb_lower: Mapped[float] = mapped_column(Float, nullable=True)
+    bb_width: Mapped[float] = mapped_column(Float, nullable=True)
+    rvol: Mapped[float] = mapped_column(Float, nullable=True)
+    vwap_distance_atr: Mapped[float] = mapped_column(Float, nullable=True)
+    htf_trend: Mapped[str] = mapped_column(String(16), default="unknown")
+    divergence: Mapped[str] = mapped_column(String(16), default="")
+    session_bucket: Mapped[str] = mapped_column(String(24), default="", index=True)
+
+    trade_plan: Mapped[dict] = mapped_column(JSON, default=dict)
+    roadmap: Mapped[dict] = mapped_column(JSON, default=dict)
+    explain_lines: Mapped[list] = mapped_column(JSON, default=list)
+
+    status: Mapped[str] = mapped_column(String(20), default="CONFIRMED", index=True)
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    exit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str] = mapped_column(String(32), default="")
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    gross_return_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    net_return_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    r_multiple: Mapped[float] = mapped_column(Float, nullable=True)
+    mfe_r: Mapped[float] = mapped_column(Float, nullable=True)
+    mae_r: Mapped[float] = mapped_column(Float, nullable=True)
+    win_loss: Mapped[str] = mapped_column(String(12), default="", index=True)
+    data_source: Mapped[str] = mapped_column(String(48), default="fmp")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "variant", "symbol", "timeframe",
+                         "direction", "bar_time", name="uq_reversion_signal"),
+        Index("ix_rev_lookup", "strategy_id", "variant", "status"),
+    )
+
+
+class StrategyHeartbeat(Base):
+    """One row per strategy worker. A stale heartbeat renders as OFFLINE rather
+    than leaving old numbers looking live."""
+    __tablename__ = "strategy_heartbeats"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(96), default="")
+    status: Mapped[str] = mapped_column(String(20), default="UNKNOWN")
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                        default=utcnow)
+    last_scan_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_signal_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(256), default="")
+    skip_reason: Mapped[str] = mapped_column(String(256), default="")
+    symbols_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    symbols_with_data: Mapped[int] = mapped_column(Integer, default=0)
+    signals_today: Mapped[int] = mapped_column(Integer, default=0)
+    errors_today: Mapped[int] = mapped_column(Integer, default=0)
+    day: Mapped[str] = mapped_column(String(12), default="")
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class DatasetRun(Base):
+    """Performance datasets. Resetting archives the old run rather than deleting
+    it, so a stats reset never destroys research."""
+    __tablename__ = "dataset_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), index=True)
+    run_number: Mapped[int] = mapped_column(Integer, default=1)
+    scope: Mapped[str] = mapped_column(String(24), default="paper")
+    label: Mapped[str] = mapped_column(String(96), default="")
+    reason: Mapped[str] = mapped_column(String(256), default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    stats_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (UniqueConstraint("strategy_id", "run_number", "scope",
+                                       name="uq_dataset_run"),)
+
+
+class StrategyChangeLog(Base):
+    """Append-only record of parameter/logic changes and what happened to the
+    dataset as a result."""
+    __tablename__ = "strategy_change_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), index=True)
+    version: Mapped[str] = mapped_column(String(16), default="")
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    changes: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    old_parameters: Mapped[dict] = mapped_column(JSON, default=dict)
+    new_parameters: Mapped[dict] = mapped_column(JSON, default=dict)
+    dataset_action: Mapped[str] = mapped_column(String(32), default="continue")
+    actor: Mapped[str] = mapped_column(String(48), default="system")

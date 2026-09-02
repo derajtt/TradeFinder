@@ -72,6 +72,8 @@ app.add_middleware(CORSMiddleware,
                    allow_origins=get_config().cors_origin_list(),
                    allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
+from .routes.risk_api import router as risk_router
+app.include_router(risk_router)
 
 
 def secrets_compare(a: str, b: str) -> bool:

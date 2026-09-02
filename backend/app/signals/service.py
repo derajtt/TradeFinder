@@ -30,9 +30,16 @@ async def create_buy_signal(session: AsyncSession, *, symbol: str, session_date:
                             score_snapshot: Dict[str, Any],
                             evidence_snapshot: Dict[str, Any],
                             is_demo: bool = False,
-                            signal_type: str = "buy") -> Optional[BuySignal]:
-    """Returns the new signal, or None if idempotency blocked a duplicate."""
-    fp = catalyst_fingerprint(evidence_snapshot.get("catalyst"))
+                            signal_type: str = "buy",
+                            fingerprint: Optional[str] = None) -> Optional[BuySignal]:
+    """Returns the new signal, or None if idempotency blocked a duplicate.
+
+    `fingerprint` must be supplied by callers whose uniqueness key is not the
+    catalyst (the model fleet keys on the model id). Patching it *after* the
+    insert used to leave a committed row fingerprinted "none", which then
+    collided with — and permanently blocked — every later signal for that
+    symbol and session date."""
+    fp = fingerprint or catalyst_fingerprint(evidence_snapshot.get("catalyst"))
     sig = BuySignal(
         signal_uid=uuid.uuid4().hex,
         symbol=symbol.upper(),

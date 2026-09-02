@@ -11,12 +11,29 @@ pytestmark = pytest.mark.asyncio
 
 
 def test_registry_engine_coverage():
+    """Every registry model must either have an engine the generic dispatcher
+    can call, or declare its own worker. Anything else is a decorative card."""
     for mid, meta in MODELS.items():
-        if meta["engine"] == "scalper":
+        if meta["engine"] == "scalper" or meta.get("own_worker"):
             continue
         assert meta["engine"] in ENGINES, mid
         assert meta["engine"] in REGIME_ALLOW, mid
     assert sum(1 for m in MODELS.values() if m.get("experimental")) == 3
+
+
+def test_own_worker_models_are_actually_dispatched():
+    """A model claiming own_worker must have a scheduler cycle that runs it —
+    otherwise it is exactly the decorative card this test exists to prevent."""
+    import inspect
+    from app import scheduler as sched
+    src = inspect.getsource(sched)
+    for mid, meta in MODELS.items():
+        if not meta.get("own_worker"):
+            continue
+        assert f'"{mid}"' in src, f"{mid} declares own_worker but is not in the scheduler"
+    assert "_reversion_cycle" in src
+    # and it must be invoked, not merely defined
+    assert src.count("await self._reversion_cycle(") >= 1
 
 
 async def test_account_isolation(db):

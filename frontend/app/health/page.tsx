@@ -14,6 +14,72 @@ interface Health {
   scheduler: { phase: string; cycles: number; last_error: string } | null;
 }
 
+const ST_CLASS: Record<string, string> = {
+  'LIVE': 'st-live', 'PAPER LIVE': 'st-paper', 'WAITING': 'st-waiting',
+  'NO_DATA': 'st-nodata', 'OFFLINE': 'st-offline', 'ERROR': 'st-error',
+  'DISABLED': 'st-disabled', 'UNKNOWN': 'st-waiting',
+};
+
+function ago(iso?: string | null): string {
+  if (!iso) return 'never';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return `${Math.max(0, Math.round(s))}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+function StrategyHealth() {
+  const [d] = usePolling<any>('/api/health/strategies', 15000);
+  if (!d) return <div className="skel" style={{ height: 260 }} />;
+  return (
+    <>
+      <div className="sect"><h2>Every strategy</h2>
+        <span className="meta">
+          {Object.entries(d.counts).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ')}
+          {' '}· a heartbeat older than {Math.round(d.stale_after_seconds / 60)} minutes reads OFFLINE
+        </span></div>
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead><tr>
+            <th>Strategy</th><th>Status</th><th>Last scan</th><th>Scanned</th>
+            <th>With data</th><th>Signals today</th><th>Errors</th><th>Risk model</th>
+            <th>Why idle</th>
+          </tr></thead>
+          <tbody>
+            {d.strategies.map((r: any) => (
+              <tr key={r.id}>
+                <td><span className="dot" style={{ background: r.color, marginRight: 7 }} />
+                  {r.name}{r.own_worker && <span className="badge neutral" style={{ marginLeft: 6 }}>own worker</span>}</td>
+                <td><span className={`st ${ST_CLASS[r.status] || 'st-waiting'}`}>{r.status}</span></td>
+                <td className="mono">{ago(r.last_scan_at || r.last_seen_at)}</td>
+                <td className="mono">{r.symbols_scanned}</td>
+                <td className="mono">{r.symbols_with_data}</td>
+                <td className="mono">{r.signals_today}</td>
+                <td className="mono" style={{ color: r.errors ? 'var(--risk)' : undefined }}>{r.errors}</td>
+                <td>{r.risk_model}</td>
+                <td style={{ maxWidth: 300, fontSize: 11.5 }} className="muted">{r.skip_reason || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="panel" style={{ marginTop: 12 }}>
+        <h3>What the statuses mean</h3>
+        <div className="rm-grid">
+          {Object.entries(d.legend).map(([k, v]: any) => (
+            <div className="rm-kv sm" key={k}>
+              <span><span className={`st ${ST_CLASS[k] || 'st-waiting'}`}>{k}</span></span>
+              <b style={{ fontFamily: 'var(--sans)', fontWeight: 500, fontSize: 11.5,
+                          color: 'var(--text-dim)', textAlign: 'right', maxWidth: 260 }}>{v}</b>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function HealthPage() {
   const [h] = usePolling<Health>('/api/health/detail', 20000);
   if (!h) return <div className="skel" style={{ height: 400, marginTop: 20 }} />;
@@ -21,6 +87,8 @@ export default function HealthPage() {
     <>
       <div className="sect"><h2>System Health</h2>
         <span className="meta">scheduler phase: {h.scheduler?.phase} · cycle #{h.scheduler?.cycles}</span></div>
+
+      <StrategyHealth />
 
       {h.backup && (
         <div className="kv" style={{ maxWidth: 380, marginBottom: 12 }}>
