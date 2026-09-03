@@ -456,3 +456,16 @@ async def test_fundamentals_are_memoised_and_core_only():
     assert a == b and a["SPY"]["pe"] == 21.5 and calls["n"] == 2   # second pass: 0 calls
     src = inspect.getsource(sched.Scheduler._models_cycle)
     assert "fundamentals(list(ETF_UNIVERSE))" in src
+
+
+def test_day_trading_universe_excludes_core_and_crypto_by_default():
+    import inspect
+    from app import scheduler as sched
+    from app.strategy import platform as plat
+    from app.scoring.engine import DEFAULT_SETTINGS
+    src = inspect.getsource(sched.Scheduler._models_cycle)
+    assert "dt_stock = list(dict.fromkeys(movers + radar)) if day_mode else stock_syms" in src
+    assert 'symbols = dt_stock if intraday_ok else []' in src
+    assert DEFAULT_SETTINGS["day_trade_crypto"] == "off"
+    assert DEFAULT_SETTINGS["model_entry_cutoff_et"] == "11:30"
+    assert plat.ATR_STOP_MULT_DEFAULT == 2.0 and plat.ATR_STOP_MULT["exp_rs_reclaim"] == 1.0

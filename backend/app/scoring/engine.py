@@ -34,10 +34,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # How many of the day's most-active / biggest-gainer names join the
     # intraday model universe alongside the core ETFs and large caps.
     "movers_cap": 35,
+    # Crypto day-trades ran -1.17R at a 14% win rate; off unless enabled.
+    "day_trade_crypto": "off",
     # No NEW model entries after this ET time. First session of data: entries
     # at 10:00 averaged +0.29R over 76 trades; 14:00 averaged -0.62R, and a
     # 15:55 flatten leaves too little room for a late trade to work.
-    "model_entry_cutoff_et": "14:00",
+    "model_entry_cutoff_et": "11:30",   # hour 10 was the only hour near breakeven; 11:00+ ran -0.6 to -0.9R
     "min_catalyst_confidence": 0.6,
     "max_extension_from_pm_high_pct": 25.0,
     "quote_freshness_sec": 120,

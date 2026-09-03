@@ -330,6 +330,9 @@ class ModelContext:
 log = logging.getLogger(__name__)
 
 MIN_RISK_FRAC = 0.0015
+# Day-trading stop distance as a multiple of ATR(5m), per engine.
+ATR_STOP_MULT_DEFAULT = 2.0
+ATR_STOP_MULT = {"exp_rs_reclaim": 1.0}
 INSIDER_DOC_FETCH_CAP = 120
 # pacing between EDGAR document fetches: ~8/s, under SEC's 10/s ceiling
 SEC_FETCH_GAP_S = 0.13
@@ -414,7 +417,13 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         day_mode = str(settings.get("day_trading_mode", "on")).lower() != "off"
         atr5 = verdict.get("atr_5m")
         if day_mode and atr5:
-            r_vol = min(max(1.5 * atr5, fill * 0.006), fill * 0.04)
+            # Counterfactual on 447 closed trades: at 2x the original stop
+            # with a 3R target, Chart Patterns went -0.79 -> +0.24R,
+            # Confluence -0.81 -> +0.07, Opening Drive -0.59 -> +0.11. RS
+            # Reclaim is the exception — wider stops made it WORSE (-0.24 ->
+            # -0.55): its losers keep falling, so it stays tight.
+            mult = ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT)
+            r_vol = min(max(mult * atr5, fill * 0.010), fill * 0.05)
             stop_ = round(fill - r_vol, 4)
             t1_ = round(fill + 1.5 * r_vol, 4)
             t2_ = round(fill + 3.0 * r_vol, 4)

@@ -1020,9 +1020,19 @@ class Scheduler:
         radar = [c.get("symbol") for c in (getattr(self.ctx, "radar_live", None) or [])[:40]
                  if c.get("symbol")]
         stock_syms = list(dict.fromkeys(list(ETF_UNIVERSE) + movers + radar))
+        # Day-trading universe excludes the calm core and crypto. Over 447
+        # closed trades the core (SPY, META, AAPL, XLE...) ran -1.07R at a 9%
+        # win rate and crypto -1.17R at 14%, while every large winner was a
+        # mover. The core still feeds regime detection and the swing models'
+        # daily bars; it is simply not day-traded.
+        day_mode = str(settings.get("day_trading_mode", "on")).lower() != "off"
+        dt_stock = list(dict.fromkeys(movers + radar)) if day_mode else stock_syms
+        dt_crypto = (crypto_syms if (not day_mode or
+                     str(settings.get("day_trade_crypto", "off")).lower() == "on") else [])
         crypto_syms = list(CRYPTO_UNIVERSE)
         hb_universe = {"core": len(ETF_UNIVERSE), "movers": len(movers),
-                       "radar": len(radar), "total": len(stock_syms)}
+                       "radar": len(radar), "total": len(stock_syms),
+                       "intraday": len(dt_stock), "crypto": len(dt_crypto)}
         # Both legs of every pair need daily bars. GLD and XOP are not in
         # ETF_UNIVERSE, so ("GDX","GLD") and ("XLE","XOP") could never resolve
         # and two of the five pairs were permanently dead.
@@ -1038,7 +1048,7 @@ class Scheduler:
                                f"high_risk: {self.last_regime['why']} — models abstain")
             return
         intraday_ok = phase in ("regular", "premarket", "prep")
-        live_syms = (stock_syms if intraday_ok else []) + crypto_syms
+        live_syms = (dt_stock if intraday_ok else []) + dt_crypto
         for s in live_syms:
             ctx["bars_5m"][s] = await self.mctx.m5(s)
         # Both are TTL-cached inside ModelContext (earnings 1h, insiders 6h), so
@@ -1164,12 +1174,17 @@ class Scheduler:
                     ctx, [x for x in (ctx.get("earnings") or {})
                           if x not in crypto_syms], cap=25)
             elif meta["asset_classes"] == ["crypto"]:
-                symbols = crypto_syms
+                symbols = dt_crypto if cadence == "intraday" else crypto_syms
             elif "crypto" in meta["asset_classes"]:
-                symbols = (stock_syms if intraday_ok or cadence != "intraday"
-                           else []) + crypto_syms
+                if cadence == "intraday":
+                    symbols = (dt_stock if intraday_ok else []) + dt_crypto
+                else:
+                    symbols = stock_syms + crypto_syms
             else:
-                symbols = stock_syms if (intraday_ok or cadence != "intraday") else []
+                if cadence == "intraday":
+                    symbols = dt_stock if intraday_ok else []
+                else:
+                    symbols = stock_syms
             scanned = with_data = errors = model_fired = 0
             cutoff = str(settings.get("model_entry_cutoff_et") or "14:00")
             try:
