@@ -1344,6 +1344,17 @@ class Scheduler:
         if intraday_ok and not past_cutoff_global:
             fired += await self._custom_confluence_pass(ctx, fired_this_pass, today,
                                                         settings, model_cfg, t)
+        else:
+            # say why, rather than leaving the seeded "no pass since start"
+            why = ("past the entry cutoff; evaluates 09:30 to the cutoff"
+                   if intraday_ok else "intraday model, market not in regular hours")
+            for mid, meta in MODELS.items():
+                if meta.get("custom"):
+                    hb = self.model_health.setdefault(mid, {})
+                    hb.update({"model_id": mid, "name": meta["name"], "engine": "custom",
+                               "status": "WAITING", "skip_reason": why,
+                               "requires": meta["requires"],
+                               "last_seen_at": now_utc().isoformat()})
         if run_daily or run_weekly or run_monthly:
             await self._set_cadence_marks(
                 daily=today if run_daily else None,

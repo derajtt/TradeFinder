@@ -30,6 +30,10 @@ def test_own_worker_models_are_actually_dispatched():
     for mid, meta in MODELS.items():
         if not meta.get("own_worker"):
             continue
+        if meta.get("custom"):
+            # dispatched generically by the confluence pass via the `custom` flag
+            assert 'meta.get("custom")' in src and "_custom_confluence_pass" in src
+            continue
         assert f'"{mid}"' in src, f"{mid} declares own_worker but is not in the scheduler"
     assert "_reversion_cycle" in src
     # and it must be invoked, not merely defined
