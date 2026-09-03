@@ -468,4 +468,4 @@ def test_day_trading_universe_excludes_core_and_crypto_by_default():
     assert 'symbols = dt_stock if intraday_ok else []' in src
     assert DEFAULT_SETTINGS["day_trade_crypto"] == "off"
     assert DEFAULT_SETTINGS["model_entry_cutoff_et"] == "11:30"
-    assert plat.ATR_STOP_MULT_DEFAULT == 2.0 and plat.ATR_STOP_MULT["exp_rs_reclaim"] == 1.0
+    assert plat.ATR_STOP_MULT_DEFAULT == 2.0 and plat.ATR_STOP_MULT["exp_rs_reclaim"] is None

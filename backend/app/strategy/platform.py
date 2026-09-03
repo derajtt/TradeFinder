@@ -332,7 +332,7 @@ log = logging.getLogger(__name__)
 MIN_RISK_FRAC = 0.0015
 # Day-trading stop distance as a multiple of ATR(5m), per engine.
 ATR_STOP_MULT_DEFAULT = 2.0
-ATR_STOP_MULT = {"exp_rs_reclaim": 1.0}
+ATR_STOP_MULT = {"exp_rs_reclaim": None}   # None = keep the engine's own stop
 INSIDER_DOC_FETCH_CAP = 120
 # pacing between EDGAR document fetches: ~8/s, under SEC's 10/s ceiling
 SEC_FETCH_GAP_S = 0.13
@@ -416,14 +416,22 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         # of price, and targets re-laid at 1.5R / 3R from the actual fill.
         day_mode = str(settings.get("day_trading_mode", "on")).lower() != "off"
         atr5 = verdict.get("atr_5m")
-        if day_mode and atr5:
+        # Engines listed with None keep their own levels: RS Reclaim's losers
+        # keep falling, and every wider stop tested made it worse.
+        if day_mode and atr5 and ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT) is not None:
             # Counterfactual on 447 closed trades: at 2x the original stop
             # with a 3R target, Chart Patterns went -0.79 -> +0.24R,
             # Confluence -0.81 -> +0.07, Opening Drive -0.59 -> +0.11. RS
             # Reclaim is the exception — wider stops made it WORSE (-0.24 ->
             # -0.55): its losers keep falling, so it stays tight.
             mult = ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT)
-            r_vol = min(max(mult * atr5, fill * 0.010), fill * 0.05)
+            # Floor 2% of price: a 1% floor let ATR on a \$2 mover produce
+            # sub-1% stops — TIGHTER than the engines' own 2% — and with
+            # settlement now seeing every intrabar wick that was a stop-out
+            # machine (299 trades, 91% stopped, -0.86R; 52% of the stop-outs had
+            # already reached +1R). Today by stop width: <1% -1.12R, 1-2% -0.98,
+            # 2-3% -0.65, 3-5% +0.06 (the only positive band), 5%+ -0.34.
+            r_vol = min(max(mult * atr5, fill * 0.03), fill * 0.06)
             stop_ = round(fill - r_vol, 4)
             t1_ = round(fill + 1.5 * r_vol, 4)
             t2_ = round(fill + 3.0 * r_vol, 4)
