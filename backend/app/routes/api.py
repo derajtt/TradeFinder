@@ -728,7 +728,8 @@ async def models_list(request: Request, db: AsyncSession = Depends(get_session))
             "id": mid, **{k: meta.get(k) for k in
                           ("name", "engine", "asset_classes", "cadence",
                            "horizon", "color", "edge", "universe",
-                           "experimental", "data_notes", "hypothesis")},
+                           "experimental", "data_notes", "hypothesis",
+                           "custom", "requires")},
             "enabled": pcfg.get("enabled", True),
             "account": ({"cash": acc.cash, "equity": acc.equity,
                          "realized_pnl": acc.realized_pnl,

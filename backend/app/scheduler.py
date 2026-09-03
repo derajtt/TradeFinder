@@ -51,6 +51,18 @@ log = logging.getLogger("scheduler")
 ALLOWED_EXCH = {"NASDAQ", "NYSE", "AMEX", "NYSE AMERICAN", "NYSEAMERICAN", "NYSE MKT"}
 
 
+# Hours (ET) in which each engine may open new positions, from the
+# per-model-by-hour study over three sessions. Unlisted engines follow the
+# global cutoff only. Small samples (n=16-28 per cell) — revisit weekly.
+ENGINE_ENTRY_HOURS = {
+    "exp_rs_reclaim": {10},          # +0.85R n=28 at 10:00; negative every other hour
+    "exp_open_drive": {10},          # -0.22R/44% at 10:00 vs -1.19R at 09:00
+    "trend_following": {10},         # -0.02R/44% at 10:00 vs -0.69R at 13:00
+    "multi_factor": {10},            # -0.17R/50% at 10:00
+    "technical_confluence": {9, 10}, # least bad at 09:00 (-0.38R/35%)
+}
+
+
 class Scheduler:
     def __init__(self, ctx: funnel.ScanContext, scan_enabled: bool):
         self.ctx = ctx
@@ -973,6 +985,70 @@ class Scheduler:
         except Exception as e:
             log.warning("could not persist cadence marks: %s", e)
 
+    async def _custom_confluence_pass(self, ctx, fired_this_pass, today, settings,
+                                      model_cfg, t) -> int:
+        """Evaluate the custom_* strategies: a symbol qualifies when every
+        finder in `requires` has an ACTIONABLE_BUY on it today. Levels come
+        from the latest 5-minute close; in day-trading mode the ATR geometry
+        rewrites stop/targets exactly as it does for every other model."""
+        from .models import BuySignal
+        fired_today: Dict[str, set] = {k: set(v) for k, v in fired_this_pass.items()}
+        try:
+            async with SessionLocal() as db:
+                rows = (await db.execute(select(BuySignal.symbol, BuySignal.profile).where(
+                    BuySignal.session_date == today, BuySignal.is_demo == False,  # noqa: E712
+                    BuySignal.lifecycle == "ACTIONABLE_BUY"))).all()
+            for sym, prof in rows:
+                fired_today.setdefault(sym, set()).add(prof)
+        except Exception as e:
+            log.warning("custom pass: could not read today's signals: %s", e)
+        total = 0
+        for mid, meta in MODELS.items():
+            if not meta.get("custom"):
+                continue
+            hb = self.model_health.setdefault(mid, {})
+            hb.update({"model_id": mid, "name": meta["name"], "engine": "custom",
+                       "enabled": (model_cfg.get(mid) or {}).get("enabled") is not False,
+                       "cadence": "intraday", "requires": meta["requires"]})
+            if (model_cfg.get(mid) or {}).get("enabled") is False:
+                hb.update({"status": "DISABLED", "skip_reason": "disabled in settings",
+                           "last_seen_at": now_utc().isoformat()})
+                continue
+            need = set(meta["requires"])
+            candidates = [s_ for s_, got in fired_today.items()
+                          if need <= got and not s_.endswith("USD")]
+            n_fired = 0
+            for sym in candidates:
+                m5 = ctx["bars_5m"].get(sym) or []
+                px = m5[-1]["c"] if m5 else None
+                if not px:
+                    continue
+                v = {"action": "buy", "entry": px, "stop": round(px * 0.97, 4),
+                     "target1": round(px * 1.045, 4), "target2": round(px * 1.09, 4),
+                     "score": 70.0, "setup": "confluence:" + "+".join(sorted(need)),
+                     "evidence": {"required": sorted(need),
+                                  "fired_today": sorted(fired_today.get(sym, ()))},
+                     "holding": "intraday",
+                     "atr_5m": (atr(m5, 14) if len(m5) >= 15 else None)}
+                sig = await mplat.record_model_signal(mid, sym, v, px, today, settings)
+                if sig:
+                    n_fired += 1
+                    await broadcaster.publish("buy_signal", {
+                        "symbol": sym, "price": px, "type": "buy", "model": mid,
+                        "score": 70.0, "signal_uid": sig.signal_uid,
+                        "initiated_at": sig.initiated_at.isoformat()})
+            hb.update({"status": "LIVE", "skip_reason": None,
+                       "last_scan_at": now_utc().isoformat(),
+                       "last_seen_at": now_utc().isoformat(),
+                       "symbols_scanned": len(fired_today),
+                       "symbols_with_data": len(candidates),
+                       "errors": 0, "signals_this_pass": n_fired,
+                       "signals_today": (hb.get("signals_today", 0) + n_fired
+                                         if hb.get("day") == today else n_fired),
+                       "day": today})
+            total += n_fired
+        return total
+
     async def _load_daily_for(self, ctx, symbols, cap: int = 25):
         """Fetch daily bars for symbols an engine has become eligible for.
         Capped so a wide EDGAR day cannot blow the shared API budget."""
@@ -1077,6 +1153,7 @@ class Scheduler:
         # Model settings live in their own store keyed by registry id. They used
         # to be read from the scalper profile table, which never contains a
         # model id, so overrides and the enable/disable switch did nothing.
+        fired_this_pass: Dict[str, set] = {}
         model_cfg = settings.get("model_settings") or {}
         if isinstance(model_cfg, str):
             try:
@@ -1084,6 +1161,12 @@ class Scheduler:
             except (ValueError, TypeError):
                 model_cfg = {}
         fired = 0
+        _cut = str(settings.get("model_entry_cutoff_et") or "11:30")
+        try:
+            _ch, _cm = (int(x) for x in _cut.split(":"))
+            past_cutoff_global = phase == "regular" and (t.hour * 60 + t.minute) >= _ch * 60 + _cm
+        except (ValueError, TypeError):
+            past_cutoff_global = False
         for mid, meta in MODELS.items():
             if meta["engine"] == "scalper" or not meta.get("build"):
                 continue
@@ -1211,6 +1294,15 @@ class Scheduler:
                     # still evaluated and visible, just not entered late
                     hb["late_rejects"] = hb.get("late_rejects", 0) + 1
                     continue
+                # Per-engine entry hours from the per-model-by-hour study.
+                # RS Reclaim: +0.85R over 28 trades in the 10:00 hour, negative
+                # in every other hour. Open Drive, Trend and Multi-Factor also
+                # only worked at 10:00; Confluence was least bad at 09:00-10:59.
+                allowed_hours = ENGINE_ENTRY_HOURS.get(mid)
+                if allowed_hours and phase == "regular" and t.hour not in allowed_hours:
+                    hb["hour_rejects"] = hb.get("hour_rejects", 0) + 1
+                    continue
+                fired_this_pass.setdefault(base, set()).add(mid)
                 # 5-minute ATR rides along so position geometry can be scaled to
                 # the session's volatility rather than to a multi-day stop
                 _m5 = ctx["bars_5m"].get(base) or []
@@ -1247,6 +1339,11 @@ class Scheduler:
                 "day": today, "cadence": cadence,
                 "universe": hb_universe,
             })
+        # ── custom confluence strategies: fire only when ALL required finders
+        # have fired on the same symbol today (this pass, or earlier today).
+        if intraday_ok and not past_cutoff_global:
+            fired += await self._custom_confluence_pass(ctx, fired_this_pass, today,
+                                                        settings, model_cfg, t)
         if run_daily or run_weekly or run_monthly:
             await self._set_cadence_marks(
                 daily=today if run_daily else None,

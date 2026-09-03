@@ -162,6 +162,47 @@ MODELS["extreme_reversion"] = {
                   "so 1m/3m are reported untested rather than assumed.",
 }
 
+# Custom confluence strategies. Chosen from the data, not designed: across
+# every 2- and 3-model combination that fired on the same symbol-day, every
+# PAIR was negative (2-model symbol-days ran -0.86R, worse than singles at
+# -0.63), and only TRIPLES anchored on chart_patterns + exp_open_drive were
+# positive. Each fires only when ALL of its required finders have fired on the
+# same symbol today, and runs its own \$10,000 ledger. Three sessions of data —
+# these are experiments with a stated basis, not proven edges.
+MODELS["custom_strategy_1"] = {
+    "name": "Custom Strategy 1", "engine": "custom", "build": True,
+    "asset_classes": ["stocks"], "cadence": "intraday",
+    "horizon": "intraday", "color": "#f0abfc", "custom": True, "own_worker": True,
+    "requires": ["chart_patterns", "exp_open_drive", "technical_confluence"],
+    "edge": "Fires only when Chart Patterns, Opening Drive AND Technical "
+            "Confluence have all fired on the same symbol today",
+    "universe": "intersection of its three finders",
+    "data_notes": "Basis: +0.38R avg, 45% win over 11 symbol-days (Sep 1-3). "
+                  "Small sample; treat as an experiment until it has 30+ trades.",
+}
+MODELS["custom_strategy_2"] = {
+    "name": "Custom Strategy 2", "engine": "custom", "build": True,
+    "asset_classes": ["stocks"], "cadence": "intraday",
+    "horizon": "intraday", "color": "#c4b5fd", "custom": True, "own_worker": True,
+    "requires": ["chart_patterns", "exp_open_drive", "trend_following"],
+    "edge": "Fires only when Chart Patterns, Opening Drive AND Trend Following "
+            "have all fired on the same symbol today",
+    "universe": "intersection of its three finders",
+    "data_notes": "Basis: +0.28R avg, 30% win over 10 symbol-days (Sep 1-3). "
+                  "Small sample; treat as an experiment until it has 30+ trades.",
+}
+MODELS["custom_strategy_3"] = {
+    "name": "Custom Strategy 3", "engine": "custom", "build": True,
+    "asset_classes": ["stocks"], "cadence": "intraday",
+    "horizon": "intraday", "color": "#fda4af", "custom": True, "own_worker": True,
+    "requires": ["chart_patterns", "exp_open_drive", "exp_rs_reclaim"],
+    "edge": "Fires only when Chart Patterns, Opening Drive AND RS Leaders "
+            "Reclaim have all fired on the same symbol today",
+    "universe": "intersection of its three finders",
+    "data_notes": "Basis: +0.24R avg, 30% win over 10 symbol-days (Sep 1-3). "
+                  "Small sample; treat as an experiment until it has 30+ trades.",
+}
+
 # Which risk model governs each strategy. "standard" routes through the platform
 # risk layer (stop-derived sizing, R:R gate, portfolio ceilings). "scalper" and
 # "WINGED" keep their own tested execution rules; the layer still renders their

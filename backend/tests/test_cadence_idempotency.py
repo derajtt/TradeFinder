@@ -469,3 +469,20 @@ def test_day_trading_universe_excludes_core_and_crypto_by_default():
     assert DEFAULT_SETTINGS["day_trade_crypto"] == "off"
     assert DEFAULT_SETTINGS["model_entry_cutoff_et"] == "11:30"
     assert plat.ATR_STOP_MULT_DEFAULT == 2.0 and plat.ATR_STOP_MULT["exp_rs_reclaim"] is None
+
+
+def test_custom_confluence_strategies_are_registered_and_dispatched():
+    import inspect
+    from app.strategy.registry import MODELS
+    from app import scheduler as sched
+    customs = {k: v for k, v in MODELS.items() if v.get("custom")}
+    assert set(customs) == {"custom_strategy_1", "custom_strategy_2", "custom_strategy_3"}
+    for mid, m in customs.items():
+        assert len(m["requires"]) == 3 and all(r in MODELS for r in m["requires"])
+        assert "chart_patterns" in m["requires"] and "exp_open_drive" in m["requires"]
+    src = inspect.getsource(sched.Scheduler._custom_confluence_pass)
+    assert "need <= got" in src            # ALL required finders must have fired
+    assert 'lifecycle == "ACTIONABLE_BUY"' in src
+    assert sched.ENGINE_ENTRY_HOURS["exp_rs_reclaim"] == {10}
+    cyc = inspect.getsource(sched.Scheduler._models_cycle)
+    assert "await self._custom_confluence_pass(" in cyc

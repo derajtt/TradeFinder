@@ -10,6 +10,7 @@ import type { SignalRow } from '../../../lib/types';
 interface ModelInfo { id: string; name: string; color: string; edge: string;
   universe: string; horizon: string; cadence: string; asset_classes: string[];
   experimental?: boolean; data_notes?: string; hypothesis?: string; enabled: boolean;
+  custom?: boolean; requires?: string[];
   account: { cash: number; equity: number; realized_pnl: number; return_pct: number;
     max_drawdown_pct: number; trades_closed: number; wins: number };
   signals: Record<string, number>; }
@@ -57,6 +58,13 @@ export default function ModelPage() {
           </h2>
         </div>
         <p className="dim" style={{ margin: '6px 0 2px', maxWidth: '75ch' }}>{m.edge}.</p>
+        {m.requires?.length ? (
+          <p className="faint" style={{ fontSize: 12, margin: '2px 0' }}>
+            Requires ALL of: {m.requires.map((r) => (
+              <span key={r} className="badge neutral" style={{ marginRight: 5 }}>{r.replace(/_/g, ' ')}</span>
+            ))} on the same symbol today.
+          </p>
+        ) : null}
         <p className="faint" style={{ fontSize: 12 }}>
           {m.universe} · {m.horizon} · cadence: {m.cadence} · {m.asset_classes.join(' + ')}
         </p>
