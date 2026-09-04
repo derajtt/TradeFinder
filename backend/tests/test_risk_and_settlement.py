@@ -141,3 +141,18 @@ def test_portfolio_risk_uses_fleet_equity_and_worst_account():
     assert "by_account" in src and "worst_account" not in src.split("return")[0].split("by_account")[0]
     # headroom is measured against the account closest to its own ceiling
     assert 'headroom = round(ceiling - (worst["open_risk_pct"] if worst else 0.0), 3)' in src
+
+
+def test_open_risk_ceiling_is_checked_per_account_before_a_fill():
+    """Nothing consulted the 3% open-risk ceiling when a fleet model opened a
+    position, and four accounts drifted to 5-8% of open risk."""
+    import inspect
+    from app.strategy import platform as plat
+    from app.scoring.engine import DEFAULT_SETTINGS
+    src = inspect.getsource(plat.record_model_signal)
+    assert "PaperPosition.profile == model_id" in src        # this ledger only
+    assert "max_total_open_risk_pct" in src
+    assert 'settings.get("portfolio_risk_gating", "advisory")' in src
+    assert "_reject_risk(" in src                            # blocks are recorded
+    assert "portfolio_risk_warning" in src                   # advisory is visible
+    assert DEFAULT_SETTINGS["portfolio_risk_gating"] == "advisory"

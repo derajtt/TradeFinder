@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 
+from ..risk.engine import RISK_DEFAULTS
 from ..models import (BuySignal, LockedOutcome, PaperAccount, PaperPosition,
                       RejectedCandidate,
                       SignalEvent)
@@ -349,6 +350,22 @@ _ACQUIRED_RE = re.compile(r"<transactionAcquiredDisposedCode>\s*<value>A</value>
 _OWNER_RE = re.compile(r"<rptOwnerName>([^<]+)</rptOwnerName>")
 
 
+async def _reject_risk(db, model_id, symbol, session_date, fill, why, snapshot):
+    """Record a risk-ceiling rejection so a model held back by portfolio limits
+    is visibly gated rather than silently quiet."""
+    row = RejectedCandidate(
+        symbol=symbol, session_date=session_date, profile=model_id,
+        lifecycle="REJECTED", price_at_reject=fill,
+        rejection_reason=f"portfolio_risk_ceiling: {why}",
+        failed_gates=["portfolio_open_risk"], snapshot=snapshot)
+    try:
+        db.add(row)
+        await db.commit()
+    except Exception as e:                       # logging must not block trading
+        db.expunge(row)
+        log.warning("risk rejection not recorded for %s/%s: %s", model_id, symbol, e)
+
+
 async def _reject_geometry(db, model_id, symbol, session_date, verdict, fill, why):
     """Record a geometry rejection so a model that keeps producing untradeable
     levels is visible on its page instead of silently emitting nothing."""
@@ -482,6 +499,36 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         acc = await get_account(db, model_id)
         risk_per_share = max(1e-6, fill - verdict["stop"])
         risk_usd = acc.equity * RISK_PCT_PER_TRADE / 100.0
+        # Portfolio ceiling, measured on this model's OWN ledger — each strategy
+        # runs a separate $10k account, so a fleet-wide total is the wrong basis.
+        # Nothing enforced this before and four accounts had drifted to 5-8% of
+        # open risk against a 3% ceiling.  Advisory by default: the breach is
+        # recorded on the signal and counted, but the trade still opens, because
+        # silently muting four models is the worse failure.
+        open_risk = 0.0
+        for op in (await db.execute(select(PaperPosition).where(
+                PaperPosition.status == "open",
+                PaperPosition.profile == model_id))).scalars().all():
+            open_risk += (abs((op.entry_fill or 0) - (op.stop or 0))
+                          * ((op.size_usd or 0) / (op.entry_fill or 1))
+                          * (op.remaining_frac or 1))
+        ceiling = float(settings.get("max_total_open_risk_pct")
+                        or RISK_DEFAULTS["max_total_open_risk_pct"])
+        after_pct = ((open_risk + risk_usd) / acc.equity * 100.0) if acc.equity else 0.0
+        if after_pct > ceiling:
+            mode = str(settings.get("portfolio_risk_gating", "advisory")).lower()
+            note = (f"open risk {after_pct:.2f}% of this account would pass the "
+                    f"{ceiling:.1f}% ceiling")
+            if mode == "enforce":
+                await _reject_risk(db, model_id, symbol, session_date, fill, note,
+                                   {"open_risk_pct": round(after_pct, 3),
+                                    "open_risk_usd": round(open_risk, 2),
+                                    "ceiling_pct": ceiling,
+                                    "account_equity": round(acc.equity, 2)})
+                return None
+            ev = dict(sig.evidence or {})
+            ev["portfolio_risk_warning"] = note
+            sig.evidence = ev
         size_usd = min(acc.cash * 0.5, max(100.0, risk_usd / risk_per_share * fill))
         pos = PaperPosition(signal_id=sig.id, symbol=symbol, profile=model_id,
                             strategy_version=VERSIONS["strategy_version"],

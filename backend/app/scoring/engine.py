@@ -36,6 +36,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "movers_cap": 35,
     # Crypto day-trades ran -1.17R at a 14% win rate; off unless enabled.
     "day_trade_crypto": "off",
+    # Per-account open-risk ceiling.  "advisory" records the breach on the
+    # signal and keeps trading; "enforce" refuses the entry and writes a
+    # rejected-candidate row so the block is visible, never silent.
+    "portfolio_risk_gating": "advisory",
     # Quant Lab forward paper worker: strategies in PAPER_TRADING / PROMISING /
     # PRODUCTION_CANDIDATE trade a lab_<strategy_id> ledger. "off" stops new
     # lab entries; open lab positions still settle through the fleet exits.
