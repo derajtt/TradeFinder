@@ -1,5 +1,8 @@
 'use client';
 import { useState } from 'react';
+import { money } from '../lib/format';
+import { Tip } from './ui/Popover';
+import { StatusPill } from './ui/StatusPill';
 
 /** A signal is only useful if it answers, in order: what, why, where in, how
  *  much, where out, and what to do next. This card is that answer. Simple mode
@@ -25,22 +28,9 @@ const ACTION_ICON: Record<string, string> = {
   ENTER: '▲', WAIT: '⏸', HOLD: '●', EXIT: '■', AVOID: '⚠', CLOSED: '✓',
 };
 
-export function money(v: any, dp = 2) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
-  const n = Number(v);
-  return '$' + n.toLocaleString(undefined,
-    { minimumFractionDigits: dp, maximumFractionDigits: n < 1 ? 6 : dp });
-}
-
-/** Small info bubble so a term never goes unexplained without adding clutter. */
-export function Tip({ term, children }: { term: string; children: React.ReactNode }) {
-  return (
-    <span className="tipwrap" tabIndex={0}>
-      {children}
-      <span className="tip" role="tooltip">{term}</span>
-    </span>
-  );
-}
+/** Re-exports: `money` now lives in lib/format; `Tip` is the shared click/focus
+ *  popover from components/ui (signature `{ text, label }`). */
+export { money, Tip };
 
 export default function TradeRoadmap({
   rm, symbol, timeframe, score, scoreBand, status, indicators, plan,
@@ -54,25 +44,24 @@ export default function TradeRoadmap({
   const now = rm?.now;
   const n = rm?.numbers;
   const noTrade = !n;
-  const dir = rm?.direction === 'short' ? 'SHORT' : 'LONG';
   const isBuy = rm?.action === 'BUY';
+  void compact;
 
   return (
     <article className={`roadmap ${noTrade ? 'is-notrade' : isBuy ? 'is-buy' : 'is-sell'}`}>
       <header className="rm-head">
         <div>
           <div className="rm-sym">{symbol}
-            {timeframe && <span className="rm-tf">{timeframe.replace('min', ' MIN').replace('hour', ' HOUR')}</span>}
+            {timeframe && <span className="rm-tf">{timeframe.replace('min', ' min').replace('hour', ' hour')}</span>}
           </div>
           <div className="rm-strat">{rm?.strategy || 'Strategy'}</div>
         </div>
         <div className="rm-act">
           {noTrade ? (
-            <span className="badge warn">⚠ NO TRADE</span>
+            <StatusPill label="No trade" tone="warn" />
           ) : (
-            <span className={`badge ${isBuy ? 'buy' : 'risk'}`}>
-              {isBuy ? '▲' : '▼'} {rm?.action} — {status || 'READY'}
-            </span>
+            <StatusPill label={isBuy ? 'Buy' : 'Sell'} tone={isBuy ? 'buy' : 'risk'}
+              raw={[rm?.action, status].filter(Boolean).join(' · ') || undefined} />
           )}
         </div>
       </header>
@@ -82,9 +71,9 @@ export default function TradeRoadmap({
           <div className="rm-score-num">{Math.round(score)}<small> / 100</small></div>
           <div>
             <div className="rm-score-band">{scoreBand}</div>
-            <Tip term="Setup Quality measures how closely this setup matches the strategy's own conditions. It is not a probability of profit.">
-              <span className="rm-score-lbl">Setup Quality ⓘ</span>
-            </Tip>
+            <span className="rm-score-lbl">Setup quality
+              <Tip label="setup quality" text="Setup quality measures how closely this setup matches the strategy's own conditions. It is not a probability of profit." />
+            </span>
           </div>
           <div className="rm-score-bar"><i style={{ width: `${Math.min(100, score)}%` }} /></div>
         </div>
@@ -112,17 +101,17 @@ export default function TradeRoadmap({
               )}
             </div>
             <div className="rm-lv neg">
-              <Tip term="If the trade moves against you, this is the planned exit that keeps the loss controlled.">
-                <span>Stop loss ⓘ</span>
-              </Tip>
+              <span>Stop loss
+                <Tip label="stop loss" text="If the trade moves against you, this is the planned exit that keeps the loss controlled." />
+              </span>
               <b>{money(n.stop)}</b>
               <small>risking {money(n.max_loss)}</small>
             </div>
             {n.entry_zone?.no_chase !== undefined && (
               <div className="rm-lv amber">
-                <Tip term="Past this price the move is already extended and the reward no longer justifies the risk.">
-                  <span>Do not chase ⓘ</span>
-                </Tip>
+                <span>Do not chase
+                  <Tip label="do not chase" text="Past this price the move is already extended and the reward no longer justifies the risk." />
+                </span>
                 <b>{money(n.entry_zone.no_chase)}</b>
               </div>
             )}
@@ -134,9 +123,9 @@ export default function TradeRoadmap({
               <div className="rm-tgt" key={t.name}>
                 <span className="rm-tgt-name">{t.name}</span>
                 <b>{money(t.price)}</b>
-                <Tip term={`You are aiming for about ${t.r} times what you are risking on this portion.`}>
-                  <span className="rm-tgt-r">{t.r}R ⓘ</span>
-                </Tip>
+                <span className="rm-tgt-r">{t.r}R
+                  <Tip label="reward multiple" text={`You are aiming for about ${t.r} times what you are risking on this portion.`} />
+                </span>
                 <span className="rm-tgt-alloc">{t.allocation_pct}% of position</span>
                 <span className="rm-tgt-prof">{money(t.profit_at_target)}</span>
               </div>
@@ -149,17 +138,17 @@ export default function TradeRoadmap({
             <div className="rm-kv"><span>Risk per trade</span><b>{n.risk_pct?.toFixed(2)}%</b></div>
             <div className="rm-kv"><span>Maximum planned loss</span><b className="neg">{money(n.max_loss)}</b></div>
             <div className="rm-kv">
-              <Tip term="A stop order reduces risk but can fill worse than the stop price in fast markets. This figure includes estimated spread, slippage and fees.">
-                <span>Worst case with costs ⓘ</span>
-              </Tip>
+              <span>Worst case with costs
+                <Tip label="worst case with costs" text="A stop order reduces risk but can fill worse than the stop price in fast markets. This figure includes estimated spread, slippage and fees." />
+              </span>
               <b className="neg">{money(n.worst_case_with_costs)}</b>
             </div>
             <div className="rm-kv"><span>Position size</span><b>{n.quantity_text}</b></div>
             <div className="rm-kv"><span>Position value</span><b>{money(n.position_value)}</b></div>
             <div className="rm-kv">
-              <Tip term="Reward compared with risk. 2R means you are aiming to make twice what you are risking.">
-                <span>Reward / risk ⓘ</span>
-              </Tip>
+              <span>Reward / risk
+                <Tip label="reward to risk" text="Reward compared with risk. 2R means you are aiming to make twice what you are risking." />
+              </span>
               <b className={n.rr?.meets_preferred ? 'pos' : ''}>1 : {n.rr?.best}</b>
             </div>
           </section>
@@ -191,7 +180,7 @@ export default function TradeRoadmap({
         </section>
       )}
 
-      <button className="rm-adv-btn" onClick={() => setAdv((a) => !a)} aria-expanded={adv}>
+      <button type="button" className="rm-adv-btn" onClick={() => setAdv((a) => !a)} aria-expanded={adv}>
         {adv ? '▾ Hide advanced details' : '▸ View advanced details'}
       </button>
 

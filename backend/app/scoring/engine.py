@@ -36,6 +36,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "movers_cap": 35,
     # Crypto day-trades ran -1.17R at a 14% win rate; off unless enabled.
     "day_trade_crypto": "off",
+    # Quant Lab forward paper worker: strategies in PAPER_TRADING / PROMISING /
+    # PRODUCTION_CANDIDATE trade a lab_<strategy_id> ledger. "off" stops new
+    # lab entries; open lab positions still settle through the fleet exits.
+    "lab_live": "on",
     # ── live SEC feed + 8-K Reactor
     "sec_live_feed": "on",
     "sec_live_feed_interval_s": 20,

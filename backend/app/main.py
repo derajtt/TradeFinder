@@ -74,6 +74,8 @@ app.add_middleware(CORSMiddleware,
 app.include_router(router)
 from .routes.risk_api import router as risk_router
 app.include_router(risk_router)
+from .routes.lab_api import router as lab_router
+app.include_router(lab_router)
 
 
 def secrets_compare(a: str, b: str) -> bool:

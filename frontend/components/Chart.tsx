@@ -18,7 +18,7 @@ export default function Chart({ bars, buyPrice, buyTime, vwap, pmHigh, pmLow, wa
     if (!ref.current || !bars.length) return;
     const chart = createChart(ref.current, {
       height: 320,
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#8b98b4', fontSize: 11 },
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#8b98b4', fontSize: 12 },
       grid: { vertLines: { color: '#182135' }, horzLines: { color: '#182135' } },
       rightPriceScale: { borderColor: '#1e2942' },
       timeScale: { borderColor: '#1e2942', timeVisible: true, secondsVisible: false },

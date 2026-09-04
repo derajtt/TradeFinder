@@ -1,0 +1,10 @@
+/* Accuracy board — page-local layout only */
+.name { display: grid; gap: 2px; }
+.nameRow { display: inline-flex; align-items: center; gap: 7px; }
+.cap { font-size: var(--fs-note); color: var(--text-faint); white-space: normal; }
+.hdr { display: inline-flex; align-items: center; gap: 6px; }
+.mark { margin-left: 6px; }
+.sortRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-note); }
+.noResults { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: var(--fs-body); }
+.noResults li { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.prose { font-size: var(--fs-body); line-height: 1.7; max-width: 80ch; }

@@ -1,4 +1,4 @@
-/** Plain-English explanations shown as tooltips across the app. */
+/** Plain-English explanations shown in popovers across the app. */
 /** Full glossary — every acronym and term used anywhere in the app. */
 export const GLOSSARY: Record<string, string> = {
   'RVOL': 'Relative Volume — today\'s volume vs what is typical for this stock by this time of day. 3x+ = unusual attention. EST = estimated until enough history exists.',
@@ -78,4 +78,34 @@ export const TERMS: Record<string, string> = {
   outcome: 'Judged ONLY on the first minutes after the pick becomes tradable (7:00 window or signal time): up ≥ threshold inside it = WIN locked forever; down ≥ threshold without the pop = LOSS; neither = NEUTRAL. Never re-judged hours later.',
   signal_type: 'BUY = every gate passed. WATCH = notable pick (score ≥ threshold, real volume, fresh price) recorded and tracked identically, but not fully qualified.',
   checkpoints: 'Snapshots taken 5/15/30/60 minutes after the signal and at the close.',
+};
+
+/** Plain-English definitions for `Term` popovers in Simple mode (spec §4.6 / §8 A8).
+ *  Keyed by glossary key; `Term` falls back to TERMS, then GLOSSARY. */
+export const PLAIN: Record<string, string> = {
+  early_pop: 'Did the stock go up in the first few minutes after it became tradable? Judged once, in that window, and never re-judged later. "Flat" means it did neither.',
+  noon_check: 'At 12:00 ET we look once: is the stock above the price it was picked at? A green noon counts as right, a red noon as wrong.',
+  conservative_floor: 'A cautious version of the win rate that allows for small samples. With few trades the floor is far below the raw rate; with hundreds it is close. Good for comparing strategies with different trade counts.',
+  r_multiple: 'Profit measured in units of what was risked. Risking $1 per share and making $2 is +2R; losing the full risk is −1R.',
+  paper: 'Simulated money. Fills use real prices with a cost estimate, but no real order is ever placed.',
+  tracked: 'Signal outcomes measured from the pick price — not an account, not money. Shows whether picks tend to work, not what they earned.',
+  backtest: 'A replay of the rules over past data. Useful for finding problems, never proof of future results.',
+  drawdown_account: 'The worst dip in the paper account\'s value from its highest point, as a percentage of the $10,000 it started with.',
+  drawdown_sum: 'The worst run of losing trades, adding each trade\'s percentage result. Not an account figure.',
+  gap: 'How far today\'s price is from yesterday\'s close, in percent. A big gap means something happened overnight.',
+  score_plain: 'A 0–100 rating of how closely a stock matches the strategy\'s rules right now. Higher is a better match — it is not a probability of profit.',
+  pipeline: 'Where today\'s stocks are in the process: found → early watch → watching → buy pick, or blocked, dropped, expired, closed.',
+  regime: 'The system\'s read of the market\'s mood today — trending, range-bound, event-driven, high risk or uncertain. Some strategies sit out in some regimes.',
+  ceiling_floor: 'A ceiling is a price level the stock has struggled to rise above; a floor is one it has struggled to fall below. Drawn automatically from past turns.',
+  whats_missing: 'The first check this stock is failing, with the value it has and the value it needs. Fix that and it moves closer to a Buy pick.',
+  ambiguous: 'The stop and the target were both hit inside one bar, so we cannot know which came first. Counted as unclear, never as a win.',
+  legacy_bucket: 'Picks recorded before lifecycle states existed. Kept for the totals; they cannot be classified further.',
+  pop_rate_incl_flat: 'Share of picks that popped, counting flat outcomes as misses. Lower than the decided-only rate because flats sit in the denominator.',
+  signals_today: 'Buy picks this strategy has issued during today\'s session.',
+  // Accuracy board (spec §3.6) column words
+  expectancy_r: 'Average result per trade in units of what was risked (R). Ranks above win rate: a strategy can be right often and still lose money.',
+  profit_factor: 'Everything the winning trades made divided by everything the losing trades lost. Above 1 means the wins outweigh the losses.',
+  backtest_dev: 'Measured on the data the rules were tuned on. Flattering by construction — the least informative column.',
+  backtest_holdout: 'Measured once on data the tuning never saw. When it disagrees with the dev column, believe this one.',
+  engine_version: 'The version of the scanner logic that produced these picks. Materially different rules get a new version and their own results pool.',
 };

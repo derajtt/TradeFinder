@@ -400,6 +400,7 @@ class Scheduler:
                     await self._models_cycle(settings, phase)
                     if self.state["cycles"] % 4 == 0:
                         await self._reversion_cycle(settings, phase)
+                        await self._lab_cycle(settings, phase)
                 elif phase == "regular":
                     if self.state["cycles"] % 2 == 0:
                         await self._tracking_cycle(settings, finalize=False)
@@ -408,12 +409,14 @@ class Scheduler:
                     await self._models_cycle(settings, phase)
                     if self.state["cycles"] % 3 == 0:
                         await self._reversion_cycle(settings, phase)
+                        await self._lab_cycle(settings, phase)
                 elif phase == "afterhours":
                     await self._tracking_cycle(settings, finalize=True)
                     if self.state["cycles"] % 3 == 0:
                         await self._models_cycle(settings, phase)  # crypto lane
                     if self.state["cycles"] % 5 == 0:
                         await self._reversion_cycle(settings, phase)
+                        await self._lab_cycle(settings, phase)
                     await self._nightly_research(settings)
                     interval = max(interval, 300)
                 elif phase == "closed":
@@ -425,6 +428,7 @@ class Scheduler:
                         await self._models_cycle(settings, phase)
                     if self.state["cycles"] % 5 == 0:
                         await self._reversion_cycle(settings, phase)
+                        await self._lab_cycle(settings, phase)
                     nxt = next_scan_start()
                     self.state["next_run_at"] = nxt.isoformat()
                 elif True:
@@ -435,6 +439,10 @@ class Scheduler:
                     interval = 60
                 self.state["cycles"] += 1
                 self.state["last_cycle_at"] = now_utc().isoformat()
+                # Reaching here means the tick raised nothing.  Only the
+                # discovery path used to set this, so outside scanning hours the
+                # flag stayed null forever and the dashboard read "starting".
+                self.state["last_cycle_ok"] = True
                 self._touch_heartbeats(phase)
                 await self._flush_provider_logs()
                 await self._persist_heartbeats()
@@ -1650,6 +1658,23 @@ class Scheduler:
             await self._health("info", "reversion",
                                f"{fired} Extreme Reversion signal(s) ({variant})")
 
+    async def _lab_cycle(self, settings, phase):
+        """Quant Lab forward paper worker (app.lab.live).
+
+        Every lab strategy whose stage is PAPER_TRADING / PROMISING /
+        PRODUCTION_CANDIDATE is evaluated on the live universe under the
+        strategy contract and trades its own `lab_<strategy_id>` fleet ledger,
+        so it is settled by the same exit engine as every other model. Rides
+        the Extreme Reversion cadence at every phase; isolated so a lab fault
+        can never stall the scalper or the fleet.
+        """
+        from .lab import live as lab_live
+        try:
+            await lab_live.run_cycle(self, settings, phase)
+        except Exception as e:
+            log.warning("lab cycle failed: %s: %s", type(e).__name__, e)
+            await self._health("warn", "lab", f"{type(e).__name__}: {e}")
+
     async def _risk_settings(self, settings):
         from .risk.engine import RISK_DEFAULTS
         raw = settings.get("risk_settings") or {}
@@ -1747,7 +1772,12 @@ class Scheduler:
                     row.day = hb.get("day") or ""
                     row.detail = {k: v for k, v in hb.items()
                                   if k in ("variant", "cadence", "engine",
-                                           "rejected_this_pass", "tracking")}
+                                           "rejected_this_pass", "tracking",
+                                           "universe", "signals_this_pass",
+                                           # 8-K Reactor gate counters: without these a
+                                           # zero-trade window is undiagnosable after a restart.
+                                           "window_rejects", "cap_rejects", "item_rejects",
+                                           "quote_rejects", "spread_rejects", "feed")}
                 await db.commit()
         except Exception as e:
             log.warning("heartbeat persist failed: %s", e)
@@ -1868,12 +1898,27 @@ class Scheduler:
             await data.close()
             async with SessionLocal() as db:
                 from .signals.service import metrics_with_outcome
-                paper_n = len((await db.execute(_sel(BuySignal).where(
-                    BuySignal.lifecycle == "ACTIONABLE_BUY",
-                    BuySignal.is_demo == False))).scalars().all())  # noqa: E712
+                # The forward sample is SETTLED paper trades on the running
+                # strategy version — not every actionable signal ever recorded,
+                # which read as "606/100 below the minimum".
+                cur_ver = str(settings.get("strategy_version")
+                              or getattr(self, "strategy_version", "") or "")
+                q = _sel(BuySignal).where(BuySignal.lifecycle == "ACTIONABLE_BUY",
+                                          BuySignal.is_demo == False,  # noqa: E712
+                                          BuySignal.outcome_v2 != "")
+                if cur_ver:
+                    q = q.where(BuySignal.strategy_version == cur_ver)
+                paper_n = len((await db.execute(q)).scalars().all())
+                met = paper_n >= 100
                 promo = {"decision": "hold",
-                         "reason": (f"forward paper sample {paper_n}/100 below "
-                                    "predefined promotion minimum"),
+                         "reason": (f"forward paper sample {paper_n}/100 settled trades"
+                                    + (" — sample met; promotion still requires a human "
+                                       "review of expectancy and drawdown"
+                                       if met else
+                                       " — below the predefined promotion minimum")),
+                         "sample_met": met,
+                         "forward_trades": paper_n,
+                         "strategy_version": cur_ver or "unversioned",
                          "requirements": {"min_forward_trades": 100,
                                           "better_reliable_wr": None,
                                           "positive_expectancy": None},

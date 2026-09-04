@@ -1,131 +1,215 @@
 'use client';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import AttentionChips from '../components/AttentionChips';
+import BuyPicks from '../components/BuyPicks';
 import CandidateTable from '../components/CandidateTable';
-import RadarTable, { type RadarRow } from '../components/RadarTable';
-import SessionStrip from '../components/SessionStrip';
+import DetailDrawer from '../components/DetailDrawer';
 import FunnelStrip from '../components/FunnelStrip';
 import NoonCard from '../components/NoonCard';
 import OpsPanel from '../components/OpsPanel';
-import DigestCard from '../components/DigestCard';
-import ProfileTabs from '../components/ProfileTabs';
-import PositionsTable from '../components/PositionsTable';
+import PositionsTable, { type LiveQuote } from '../components/PositionsTable';
+import RadarTable from '../components/RadarTable';
 import RejectedTable from '../components/RejectedTable';
-import DetailDrawer from '../components/DetailDrawer';
+import SessionStrip from '../components/SessionStrip';
 import SignalTable from '../components/SignalTable';
-import { useEventStream, usePolling } from '../lib/api';
+import StatusLine from '../components/StatusLine';
+import TrustTiles from '../components/TrustTiles';
+import s from '../components/today.module.css';
+import { Advanced, SectionHeader, StrategyScope, useScopeLabel } from '../components/ui';
+import { usePollingState, useSharedPoll, useStream } from '../lib/api';
+import { fmtEtShort } from '../lib/format';
+import { useMode } from '../lib/mode';
 import { useProfile } from '../lib/profile';
-import { fmtPct, fmtPrice } from '../lib/format';
-import type { CandidateRow, SignalRow, StatusPayload } from '../lib/types';
+import { phaseKeyOf, useAppSettings, useOps, useStatus } from '../lib/status';
+import type {
+  AlertRow, Brief, CandidateRow, Canonical, Digest, Noon, Position, RadarRow, Rejected, SignalRow,
+} from '../lib/types';
 
-export default function Dashboard() {
+type LiveSignal = Partial<SignalRow> & { signal_uid: string };
+
+/** Fold the stream's partial signal updates into the polled rows (initiation
+ *  fields never change; only live price fields are overwritten). */
+function mergeLive(rows: SignalRow[], live: Record<string, LiveSignal>): SignalRow[] {
+  return rows.map((r) => {
+    const u = live[r.signal_uid];
+    if (!u) return r;
+    return {
+      ...r,
+      current: u.current ?? r.current, current_ts: u.current_ts ?? r.current_ts,
+      day_high: u.day_high ?? r.day_high, day_low: u.day_low ?? r.day_low,
+      since_high: u.since_high ?? r.since_high, since_low: u.since_low ?? r.since_low,
+      change_pct: u.change_pct ?? r.change_pct, change_abs: u.change_abs ?? r.change_abs,
+      max_gain_pct: u.max_gain_pct ?? r.max_gain_pct, max_drawdown_pct: u.max_drawdown_pct ?? r.max_drawdown_pct,
+    };
+  });
+}
+
+/** Today — "Is there anything the system says to buy right now — and if not,
+ *  why not and when next?" One data layer (spec §2 table); every section gets
+ *  `loaded` and shows skeletons until its first response. */
+export default function Today() {
   const [profile] = useProfile();
-  const [candResp] = usePolling<{ rows: CandidateRow[]; radar?: RadarRow[] }>('/api/candidates', 30000);
-  const [sigResp, , reloadSigs] = usePolling<{ rows: SignalRow[] }>(`/api/signals?active_only=true&profile=${profile}`, 30000);
-  const [status] = usePolling<StatusPayload>('/api/status', 20000);
+  const scopeLabel = useScopeLabel();
+  const { advanced } = useMode();
+
+  /* ── data layer (spec §2) ─────────────────────────────────────────────── */
+  const { status, loaded: statusLoaded } = useStatus();                 // 15s + stream (provider)
+  const { ops, loaded: opsLoaded } = useOps();                          // 30s shared
+  const { settings, loaded: settingsLoaded } = useAppSettings();        // 120s shared
+  const sig = usePollingState<{ rows: SignalRow[] }>(`/api/signals?active_only=true&profile=${profile}`, 30000);
+  const cand = usePollingState<{ rows: CandidateRow[]; radar?: RadarRow[] }>('/api/candidates', 30000);
+  const pos = usePollingState<{ rows: Position[] }>(`/api/positions?profile=${profile}`, 20000);
+  const alerts = usePollingState<{ rows: AlertRow[] }>('/api/alerts', 60000);
+  const canon = usePollingState<Canonical>(`/api/report/canonical?profile=${profile}`, 30000);
+  const noon = usePollingState<Noon>('/api/outcomes/noon', 60000);
+  // Advanced-only fetches stay idle (empty path) in Simple.
+  const digest = usePollingState<Digest>(advanced ? '/api/digest' : '', 60000);
+  const brief = usePollingState<Brief>(advanced ? '/api/brief' : '', 120000);
+  const canonAll = useSharedPoll<Canonical>(advanced ? '/api/report/canonical' : '', 60000);
+  const rejected = usePollingState<{ rows: Rejected[] }>(advanced ? `/api/rejected?profile=${profile}` : '', 60000);
+
+  /* ── stream overlays ──────────────────────────────────────────────────── */
   const [liveRows, setLiveRows] = useState<CandidateRow[] | null>(null);
   const [liveRadar, setLiveRadar] = useState<RadarRow[] | null>(null);
-  const [liveSigs, setLiveSigs] = useState<Record<string, Partial<SignalRow>>>({});
+  const [liveSigs, setLiveSigs] = useState<Record<string, LiveSignal>>({});
   const [updated, setUpdated] = useState<Set<string>>(new Set());
-  const [selected, setSelected] = useState<string | null>(null);
   const clearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadSigs = sig.reload;
 
-  useEventStream({
-    candidates: (d) => {
-      setLiveRows(d.rows ?? []);
+  useStream({
+    candidates: (d: { rows?: CandidateRow[]; radar?: RadarRow[] }) => {
+      const rows = d.rows ?? [];
+      setLiveRows(rows);
       if (d.radar) setLiveRadar(d.radar);
-      const syms = new Set<string>((d.rows ?? []).map((r: CandidateRow) => r.symbol));
-      setUpdated(syms);
+      setUpdated(new Set(rows.map((r) => r.symbol)));
       if (clearRef.current) clearTimeout(clearRef.current);
       clearRef.current = setTimeout(() => setUpdated(new Set()), 1600);
     },
-    signals: (d) => {
+    signals: (d: { rows?: LiveSignal[] }) => {
       setLiveSigs((prev) => {
         const next = { ...prev };
-        for (const u of d.rows ?? []) next[u.signal_uid] = u;
+        for (const u of d.rows ?? []) if (u.signal_uid) next[u.signal_uid] = u;
         return next;
       });
     },
     buy_signal: () => reloadSigs(),
   });
 
-  const rows = liveRows ?? candResp?.rows ?? [];
-  const radar = liveRadar ?? candResp?.radar ?? [];
-  const sigRows = (sigResp?.rows ?? []).map((s) => {
-    const u = liveSigs[s.signal_uid] as any;
-    return u ? { ...s, current: u.current ?? s.current,
-      day_high: u.day_high ?? s.day_high, day_low: u.day_low ?? s.day_low,
-      since_high: u.since_high ?? s.since_high, since_low: u.since_low ?? s.since_low,
-      change_pct: u.change_pct ?? s.change_pct,
-      max_gain_pct: u.max_gain_pct ?? s.max_gain_pct,
-      max_drawdown_pct: u.max_drawdown_pct ?? s.max_drawdown_pct } : s;
-  });
+  /* ── derived ──────────────────────────────────────────────────────────── */
+  const candRows = liveRows ?? cand.data?.rows ?? [];
+  const radar = liveRadar ?? cand.data?.radar ?? [];
+  const candLoaded = cand.loaded || liveRows !== null;
 
-  const best = sigRows.reduce<SignalRow | null>((a, b) =>
-    (b.change_pct ?? -1e9) > (a?.change_pct ?? -1e9) ? b : a, null);
-  const topCand = rows[0];
-  const onSelect = useCallback((sym: string) => setSelected(sym), []);
+  const sigRows = useMemo(() => mergeLive(sig.data?.rows ?? [], liveSigs), [sig.data, liveSigs]);
+  const buys = useMemo(() => sigRows.filter((r) => r.signal_type === 'buy' && r.status === 'active'), [sigRows]);
+  const allWatches = useMemo(() => sigRows
+    .filter((r) => r.signal_type === 'watch' && r.status === 'active')
+    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1)), [sigRows]);
+  // Simple: a stock that is already a Buy pick has become a buy — it is not repeated under
+  // "could become buys" (its Buy card is right above). Advanced keeps every tracked row.
+  const buySyms = useMemo(() => new Set(buys.map((r) => r.symbol)), [buys]);
+  const watches = useMemo(
+    () => (advanced ? allWatches : allWatches.filter((r) => !buySyms.has(r.symbol))),
+    [advanced, allWatches, buySyms]);
+  const watchesNotRepeated = advanced ? 0 : new Set(allWatches.filter((r) => buySyms.has(r.symbol)).map((r) => r.symbol)).size;
+  const liveBySymbol = useMemo(() => {
+    const m: Record<string, LiveQuote> = {};
+    for (const r of sigRows) {
+      const prev = m[r.symbol];
+      if (!prev || (r.current_ts ?? '') > (prev.current_ts ?? '')) m[r.symbol] = { current: r.current, current_ts: r.current_ts };
+    }
+    return m;
+  }, [sigRows]);
+  const latestWatchTs = useMemo(() => watches.reduce<string | null>(
+    (a, r) => (r.current_ts && (!a || r.current_ts > a) ? r.current_ts : a), null), [watches]);
+
+  const positions = pos.data?.rows ?? [];
+  const phaseKey = phaseKeyOf(status?.phase);
+  const marketClosed = !(phaseKey === 'premarket' || phaseKey === 'open');
+  const confirmAt = settings?.buy_confirm_after_et ?? null;
+  const minBuy = settings?.min_score_for_buy;
+  const freshSec = settings?.quote_freshness_sec;
+  const chipsLoaded = statusLoaded && sig.loaded && pos.loaded && alerts.loaded && noon.loaded;
+
+  const [selected, setSelected] = useState<string | null>(null);
+  const onSelectSym = useCallback((sym: string) => setSelected(sym), []);
+  const onSelectRow = useCallback((r: SignalRow) => setSelected(r.symbol), []);
+
+  const watchTitle = !sig.loaded ? 'Watching'
+    : watches.length ? `Watching — ${watches.length} stock${watches.length === 1 ? '' : 's'}` : 'Watching — none';
+  // ScorePill bands: ≥ min Strong · ≥ 55 OK · else Weak — the OK band only exists when min > 55.
+  const scoreNote = minBuy == null ? undefined
+    : minBuy > 55
+      ? `Score out of 100 · ≥ ${minBuy} needed to buy · Strong ≥ ${minBuy} · OK 55–${minBuy - 1} · Weak < 55`
+      : `Score out of 100 · Strong ≥ ${minBuy} (needed to buy) · Weak < ${minBuy}`;
+  // "What's missing" reads the live candidate list; when the last cycle found no candidates every
+  // cell would say "Not in today's scan", so the column is left out and the note says why.
+  const wmAvailable = !candLoaded || candRows.length > 0;
+  const wmNote = wmAvailable || advanced ? undefined
+    : `What's missing appears while the scanner has candidates — the last cycle found none`;
+  const watchNote = [scoreNote, wmNote].filter(Boolean).join(' · ') || undefined;
+  const watchCaption = `Tracked · ${scopeLabel} · qualified by the scanner but not yet buys · prices as of ${latestWatchTs ? fmtEtShort(latestWatchTs) : '—'}`
+    + (watchesNotRepeated > 0 ? ` · ${watchesNotRepeated} already ${watchesNotRepeated === 1 ? 'a Buy pick' : 'Buy picks'} above, not repeated` : '');
+  const scannerCaption = statusLoaded && status?.scanner
+    ? `All models · ${status.scanner.candidates} candidates in the last cycle`
+    : 'All models';
 
   return (
     <>
-      <SessionStrip confirmAt="07:00" />
-      <OpsPanel />
-      <DigestCard />
-      <ProfileTabs />
-      <FunnelStrip profile={profile} />
-      <div className="cards">
-        <div className={`card ${sigRows.length ? 'glow-buy' : ''}`}>
-          <h3>Active BUY Signals</h3>
-          <div className="big">{sigRows.length}</div>
-          <div className="sub">{sigRows.length ? 'tracking from immutable initiation price' : 'none yet — all gates must pass'}</div>
-        </div>
-        <div className="card">
-          <h3>Best Current Performer</h3>
-          <div className="big">{best ? `${best.symbol} ${fmtPct(best.change_pct)}` : '—'}</div>
-          <div className="sub">{best ? `BUY ${fmtPrice(best.buy_price)} → now ${fmtPrice(best.current)}` : 'no active signals'}</div>
-        </div>
-        <div className="card">
-          <h3>Highest-Score Candidate</h3>
-          <div className="big">{topCand ? `${topCand.symbol} · ${topCand.score.toFixed(0)}` : '—'}</div>
-          <div className="sub">{topCand ? (topCand.catalyst_type || 'no catalyst identified') : 'scanner warming up'}</div>
-        </div>
-        <div className="card">
-          <h3>Scanner Hit Rate</h3>
-          <div className="big" title="WIN = popped up within the first minutes of tradability (locked forever) · LOSS = dropped instead · judged only on the early window, never hours later">
-            {status?.outcomes?.win_rate != null ? `${(status.outcomes.win_rate * 100).toFixed(0)}%` : '—'}
-          </div>
-          <div className="sub">
-            {status?.outcomes
-              ? <><span className="pos">{status.outcomes.win}W</span> · <span className="dim">{status.outcomes.neutral}N</span> · <span className="neg">{status.outcomes.loss}L</span> · {status.outcomes.pending} pending</>
-              : 'no tracked picks yet'}
-          </div>
-        </div>
-        <div className="card">
-          <h3>Scanner Health</h3>
-          <div className="big" style={{ color: status?.scanner?.last_cycle_ok ? 'var(--buy)' : 'var(--warn)' }}>
-            {status?.scanner?.paused ? 'PAUSED' : status?.scanner?.last_cycle_ok ? 'LIVE' : status?.scanner?.last_cycle_ok === false ? 'ERROR' : '…'}
-          </div>
-          <div className="sub">cycle #{status?.scanner?.cycles ?? '—'} · {status?.phase}</div>
-        </div>
+      {/* 2.0 + 2.1 — scope, status line, attention chips */}
+      <div className={s.head}>
+        <StatusLine ops={ops} opsLoaded={opsLoaded}
+          digest={digest.data} brief={brief.data} canonicalAll={canonAll.data} />
+        <StrategyScope />
       </div>
+      <AttentionChips buys={buys} watches={watches} positions={positions}
+        alerts={alerts.data?.rows ?? []} noon={noon.data}
+        quoteFreshnessSec={freshSec} loaded={chipsLoaded} />
 
-      <div className="sect">
-        <h2>Active BUY Signals</h2>
-        <span className="meta">initiation price never changes; live fields update separately</span>
-      </div>
-      <SignalTable rows={sigRows} compact onSelect={(s) => setSelected(s.symbol)} />
+      {/* 2.2 — premarket clock */}
+      <SessionStrip confirmAt={confirmAt} loaded={settingsLoaded} />
 
-      <div className="sect" style={{ marginTop: 30 }}>
-        <h2>Candidate Scanner</h2>
-        <span className="meta">click any row for the full breakdown</span>
-        <span className="spacer" />
-      </div>
-      <CandidateTable rows={rows} updatedSyms={updated} onSelect={onSelect} />
+      {/* 2.3 — buy picks */}
+      <BuyPicks rows={buys} loaded={sig.loaded && opsLoaded} scopeLabel={scopeLabel}
+        quietReason={ops?.quiet_reason} confirmAt={confirmAt} nextScanStart={status?.next_scan_start}
+        onSelect={onSelectRow} minScoreForBuy={minBuy} quoteFreshnessSec={freshSec} />
 
-      <NoonCard />
-      <PositionsTable onSelect={onSelect} profile={profile} />
-      <RejectedTable onSelect={onSelect} profile={profile} />
-      <RadarTable rows={radar} onSelect={onSelect} />
+      {/* 2.4 — watching */}
+      <SectionHeader id="watching" title={watchTitle}
+        question="Which stocks is the model watching, what is missing, and how are they doing since it spotted them?"
+        caption={watchCaption}
+        evidence="TRACKED"
+        note={watchNote} />
+      <SignalTable rows={watches} variant="watch" scope={scopeLabel} loaded={sig.loaded} cap={8}
+        marketClosed={marketClosed} minScoreForBuy={minBuy} onSelect={onSelectRow}
+        showWhatsMissing={wmAvailable ? undefined : false} evidenceChip={false} />
 
+      {/* 2.5 — scanner */}
+      <SectionHeader id="scanner" title="Scanner — what it is looking at"
+        question="What stocks are being checked right now, and what is blocking them?"
+        caption={scannerCaption} />
+      <CandidateTable rows={candRows} updatedSyms={updated} onSelect={onSelectSym} loaded={candLoaded}
+        minScoreForBuy={minBuy} phaseKey={phaseKey} quietReason={ops?.quiet_reason}
+        lastCycleAt={status?.scanner?.last_cycle_at} />
+
+      {/* 2.6 — trust */}
+      <TrustTiles canonical={canon.data} status={status} noon={noon.data} scopeLabel={scopeLabel}
+        earlyWindowMin={settings?.early_window_min} loaded={canon.loaded && statusLoaded && noon.loaded} />
+      <Advanced><NoonCard noon={noon.data} loaded={noon.loaded} /></Advanced>
+
+      {/* 2.7 — open paper trades */}
+      <PositionsTable rows={positions} loaded={pos.loaded} scopeLabel={scopeLabel}
+        onSelect={onSelectSym} liveBySymbol={liveBySymbol} />
+
+      {/* 2.8–2.11 — Advanced only */}
+      <Advanced>
+        <FunnelStrip canonical={canon.data} loaded={canon.loaded} scopeLabel={scopeLabel} />
+        <OpsPanel />
+        <RejectedTable rows={rejected.data?.rows ?? []} loaded={rejected.loaded} onSelect={onSelectSym} />
+        <RadarTable rows={radar} onSelect={onSelectSym} loaded={candLoaded} />
+      </Advanced>
+
+      {/* 2.12 — disclaimer (unchanged text) */}
       <p className="disclaimer">
         BUY is a rules-based research signal produced by the documented scoring engine
         (momentum, catalyst, filings, liquidity, price confirmation, company quality, minus risk
@@ -133,7 +217,7 @@ export default function Dashboard() {
         execution. Data: Financial Modeling Prep &amp; SEC EDGAR; delays and gaps are labeled, never hidden.
       </p>
 
-      {selected && <DetailDrawer symbol={selected} onClose={() => setSelected(null)} />}
+      {selected ? <DetailDrawer symbol={selected} onClose={() => setSelected(null)} /> : null}
     </>
   );
 }

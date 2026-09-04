@@ -1,177 +1,280 @@
 'use client';
-import { usePolling } from '../../lib/api';
-import { fmtEtDate } from '../../lib/format';
+import { useMemo } from 'react';
+import { Advanced, DataTable, Details, EmptyState, SectionHeader, StatusPill, type Column } from '../../components/ui';
+import { usePollingState } from '../../lib/api';
+import { fmtAgo, fmtEtDate, fmtNum, fmtPrice } from '../../lib/format';
+import { useScannerState, useStatus } from '../../lib/status';
+import type { Canonical, HealthDetail, StrategyHealth, StrategyHealthRow } from '../../lib/types';
+import { useMode } from '../../lib/mode';
+import { LIFECYCLE, humanKey, modelStatus, phaseLabel, type Label } from '../../lib/vocab';
+import c from '../controls.module.css';
 
-interface Health {
-  env_status: Record<string, boolean>;
-  backup?: { status: string; latest?: string; age_hours?: number; size_mb?: number; count?: number; note?: string };
-  entitlements: Record<string, { ok: boolean; status: number }>;
-  endpoints: { provider: string; endpoint: string; calls: number; ok: number;
-    last_status: number; last_ts: string; avg_latency_ms: number; last_count: number }[];
-  events: { ts: string; level: string; component: string; message: string }[];
-  runs: { id: number; started: string; finished: string | null; phase: string; status: string;
-    universe: number; shortlisted: number; enriched: number; api_calls: number; error: string }[];
-  scheduler: { phase: string; cycles: number; last_error: string } | null;
+/* Spec §3.5 — System health. One question: is anything broken? */
+
+interface Check { ok: boolean; text: string }
+type Entitlement = { ok: boolean; status: number };
+
+/** Probe keys arrive in more than one spelling (e.g. EARNINGS-CAL / earnings_cal); keep the first. */
+function dedupeEntitlements(ent: Record<string, Entitlement> | undefined): [string, Entitlement][] {
+  const seen = new Map<string, [string, Entitlement]>();
+  for (const [k, v] of Object.entries(ent ?? {})) {
+    const norm = k.toUpperCase().replace(/[_\s]+/g, '-');
+    if (!seen.has(norm)) seen.set(norm, [k, v]);
+  }
+  return [...seen.values()];
 }
 
-const ST_CLASS: Record<string, string> = {
-  'LIVE': 'st-live', 'PAPER LIVE': 'st-paper', 'WAITING': 'st-waiting',
-  'NO_DATA': 'st-nodata', 'OFFLINE': 'st-offline', 'ERROR': 'st-error',
-  'DISABLED': 'st-disabled', 'UNKNOWN': 'st-waiting',
+function backupPill(b: HealthDetail['backup']): Label & { detail: string | null } {
+  if (!b) return { label: 'Backup status unknown', tone: 'neutral', detail: null };
+  const detail = [b.latest, b.size_mb != null ? `${fmtNum(b.size_mb, 1)} MB` : null,
+    b.count != null ? `${b.count} kept` : null, b.note].filter(Boolean).join(' · ') || null;
+  if (b.status === 'OK' && b.age_hours != null && b.age_hours < 24)
+    return { label: `Backed up ${fmtNum(b.age_hours, 1)} h ago`, tone: 'buy', detail };
+  if (b.status === 'OK' || b.status === 'STALE')
+    return { label: `Backup is ${b.age_hours != null ? fmtNum(b.age_hours, 1) : '—'} h old`, tone: 'warn', detail };
+  if (b.status === 'NONE') return { label: 'No backups yet', tone: 'warn', detail };
+  return { label: 'Backup status unknown', tone: 'neutral', detail };
+}
+
+/** Event messages are free text; money and long decimals inside them get the shared formatters.
+ *  In Simple the lifecycle enums read as their plain labels, "@ 3.86" reads "at $3.86" and
+ *  ALL_CAPS policy ids in parentheses are dropped (they stay visible in Advanced). */
+function fmtMessage(m: string, advanced: boolean): string {
+  let s = String(m ?? '')
+    .replace(/\$(\d[\d,]*(?:\.\d+)?)/g, (_, n: string) => fmtPrice(Number(n.replace(/,/g, ''))))
+    .replace(/(^|[^\w.$])(\d+\.\d{3,})(?![\w.])/g, (_, pre: string, n: string) => pre + fmtNum(Number(n)));
+  if (!advanced) {
+    s = s.replace(/\b(DISCOVERED|EARLY_WATCH|QUALIFIED_WATCH|ACTIONABLE_BUY|REJECTED|INVALIDATED|EXPIRED|CLOSED|DATA_ERROR)\b/g,
+      (k) => LIFECYCLE[k]?.label ?? k)
+      .replace(/ @ (\d+(?:\.\d+)?)/g, (_, n: string) => ` at ${fmtPrice(Number(n))}`)
+      .replace(/\s*\([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\)/g, '');
+  }
+  return s;
+}
+
+const RUN_STATUS: Record<string, Label> = {
+  ok: { label: 'OK', tone: 'buy' }, error: { label: 'Error', tone: 'risk' },
+  running: { label: 'Running', tone: 'early' }, skipped: { label: 'Skipped', tone: 'neutral' },
 };
 
-function ago(iso?: string | null): string {
-  if (!iso) return 'never';
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 60) return `${Math.max(0, Math.round(s))}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
-
-function StrategyHealth() {
-  const [d] = usePolling<any>('/api/health/strategies', 15000);
-  if (!d) return <div className="skel" style={{ height: 260 }} />;
-  return (
-    <>
-      <div className="sect"><h2>Every strategy</h2>
-        <span className="meta">
-          {Object.entries(d.counts).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ')}
-          {' '}· a heartbeat older than {Math.round(d.stale_after_seconds / 60)} minutes reads OFFLINE
-        </span></div>
-      <div className="tbl-wrap">
-        <table className="tbl">
-          <thead><tr>
-            <th>Strategy</th><th>Status</th><th>Last scan</th><th>Scanned</th>
-            <th>With data</th><th>Signals today</th><th>Errors</th><th>Risk model</th>
-            <th>Why idle</th>
-          </tr></thead>
-          <tbody>
-            {d.strategies.map((r: any) => (
-              <tr key={r.id}>
-                <td><span className="dot" style={{ background: r.color, marginRight: 7 }} />
-                  {r.name}{r.own_worker && <span className="badge neutral" style={{ marginLeft: 6 }}>own worker</span>}</td>
-                <td><span className={`st ${ST_CLASS[r.status] || 'st-waiting'}`}>{r.status}</span></td>
-                <td className="mono">{ago(r.last_scan_at || r.last_seen_at)}</td>
-                <td className="mono">{r.symbols_scanned}</td>
-                <td className="mono">{r.symbols_with_data}</td>
-                <td className="mono">{r.signals_today}</td>
-                <td className="mono" style={{ color: r.errors ? 'var(--risk)' : undefined }}>{r.errors}</td>
-                <td>{r.risk_model}</td>
-                <td style={{ maxWidth: 300, fontSize: 11.5 }} className="muted">{r.skip_reason || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="panel" style={{ marginTop: 12 }}>
-        <h3>What the statuses mean</h3>
-        <div className="rm-grid">
-          {Object.entries(d.legend).map(([k, v]: any) => (
-            <div className="rm-kv sm" key={k}>
-              <span><span className={`st ${ST_CLASS[k] || 'st-waiting'}`}>{k}</span></span>
-              <b style={{ fontFamily: 'var(--sans)', fontWeight: 500, fontSize: 11.5,
-                          color: 'var(--text-dim)', textAlign: 'right', maxWidth: 260 }}>{v}</b>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
-
 export default function HealthPage() {
-  const [h] = usePolling<Health>('/api/health/detail', 20000);
-  if (!h) return <div className="skel" style={{ height: 400, marginTop: 20 }} />;
+  const { data: h, loaded: hLoaded } = usePollingState<HealthDetail>('/api/health/detail', 20000);
+  const { data: s, loaded: sLoaded } = usePollingState<StrategyHealth>('/api/health/strategies', 15000);
+  // Reconciliation problem line (spec §7.10) — canonical report for all models.
+  const { data: canon } = usePollingState<Canonical>('/api/report/canonical', 60000);
+  const { status } = useStatus();
+  const scanner = useScannerState();
+  const { advanced } = useMode();
+  const paperMode = status?.paper_mode;
+  const loaded = hLoaded && sLoaded;
+
+  const strategies = s?.strategies ?? [];
+  const entitlements = useMemo(() => dedupeEntitlements(h?.entitlements), [h?.entitlements]);
+  const entOk = entitlements.filter(([, e]) => e.ok).length;
+
+  const checks = useMemo<Check[]>(() => {
+    if (!loaded) return [];
+    const out: Check[] = [];
+    const scannerBad = scanner.key === 'problem' || scanner.key === 'unreachable';
+    out.push({ ok: !scannerBad, text: scannerBad
+      ? `${scanner.label}${status?.scanner?.last_error ? ` — ${status.scanner.last_error}` : ''}`
+      : scanner.label });
+    const b = h?.backup;
+    const backupOk = !!b && b.status === 'OK' && b.age_hours != null && b.age_hours < 24;
+    out.push({ ok: backupOk, text: backupOk
+      ? `Database backed up ${fmtNum(b!.age_hours!, 1)} h ago`
+      : b?.status === 'NONE' ? 'No database backup found yet'
+        : b?.age_hours != null ? `Database backup is ${fmtNum(b.age_hours, 1)} h old (should be under 24 h)`
+          : `Database backup status unknown${b?.note ? ` — ${b.note}` : ''}` });
+    for (const r of strategies) {
+      if (r.errors > 0) out.push({ ok: false, text: `${r.name}: ${r.errors} error${r.errors === 1 ? '' : 's'} in its last pass` });
+    }
+    for (const [name, e] of entitlements) {
+      if (!e.ok) out.push({ ok: false, text: `${name} is not in the FMP plan (HTTP ${e.status})` });
+    }
+    if (canon?.reconciliation && canon.reconciliation.equals_total === false) {
+      out.push({ ok: false, text: 'Pick counts do not reconcile — the lifecycle buckets do not add up to the total' });
+    }
+    return out;
+  }, [loaded, scanner.key, scanner.label, status?.scanner?.last_error, h?.backup, strategies, entitlements, canon]);
+  const problems = checks.filter((k) => !k.ok);
+
+  const allIdle = strategies.length > 0 && strategies.every((r) => !r.symbols_scanned);
+  const stratCols = useMemo<Column<StrategyHealthRow>[]>(() => [
+    { key: 'name', header: 'Strategy', align: 'l', simple: true, sortValue: (r) => r.name,
+      cell: (r) => (
+        <span className={`stock-cell ${c.nowrap}`}>
+          <span className="dot" style={{ background: r.color || 'var(--text-faint)' }} aria-hidden />
+          <span>{r.name}</span>
+          {r.own_worker ? <span className="faint">own worker</span> : null}
+        </span>
+      ) },
+    { key: 'status', header: 'Status', align: 'l', simple: true, sortValue: (r) => r.status,
+      cell: (r) => <StatusPill size="sm" {...modelStatus(r.status, { paperMode, trades: r.trades_closed })} raw={r.status} /> },
+    { key: 'last_scan', header: 'Last scan', align: 'l', simple: true,
+      sortValue: (r) => r.last_scan_at || r.last_seen_at || null,
+      cell: (r) => (r.last_scan_at || r.last_seen_at ? fmtAgo(r.last_scan_at || r.last_seen_at) : 'never') },
+    { key: 'symbols_scanned', header: 'Scanned', simple: true, sortValue: (r) => r.symbols_scanned,
+      cell: (r) => fmtNum(r.symbols_scanned, 0) },
+    { key: 'symbols_with_data', header: 'With data', sortValue: (r) => r.symbols_with_data,
+      cell: (r) => fmtNum(r.symbols_with_data, 0) },
+    { key: 'signals_today', header: 'Signals today', term: 'signals_today', simple: true,
+      sortValue: (r) => r.signals_today, isEmpty: () => allIdle,
+      cell: (r) => fmtNum(r.signals_today, 0) },
+    { key: 'errors', header: 'Errors', simple: true, sortValue: (r) => r.errors,
+      cell: (r) => <span className={r.errors ? 'neg' : undefined}>{fmtNum(r.errors, 0)}</span> },
+    { key: 'risk_model', header: 'Risk model', align: 'l', cell: (r) => humanKey(r.risk_model) },
+    { key: 'skip_reason', header: 'Why idle', align: 'l', simple: true,
+      cell: (r) => <span className="dim">{r.skip_reason || '—'}</span> },
+  ], [paperMode, allIdle]);
+
+  // LIVE and PAPER LIVE both read "Paper trading" in plain English, so merge counts by label.
+  const countsLine = useMemo(() => {
+    if (!s) return '';
+    const byLabel = new Map<string, number>();
+    for (const [k, v] of Object.entries(s.counts)) {
+      const label = modelStatus(k, { paperMode }).label.toLowerCase();
+      byLabel.set(label, (byLabel.get(label) ?? 0) + v);
+    }
+    return [...byLabel.entries()].sort((a, b) => b[1] - a[1]).map(([label, v]) => `${v} ${label}`).join(' · ');
+  }, [s, paperMode]);
+  const staleMin = s ? Math.round(s.stale_after_seconds / 60) : null;
+  const cycles = status?.scanner?.cycles;
+  const phase = h?.scheduler?.phase ?? status?.phase;
+  const backup = backupPill(h?.backup);
+
+  const endpointCols: Column<HealthDetail['endpoints'][number]>[] = [
+    { key: 'provider', header: 'Provider', align: 'l', simple: true, sortValue: (r) => r.provider, cell: (r) => r.provider },
+    { key: 'endpoint', header: 'Endpoint', align: 'l', simple: true, sortValue: (r) => r.endpoint,
+      cell: (r) => <code className={c.code}>{r.endpoint}</code> },
+    { key: 'calls', header: 'Calls', simple: true, sortValue: (r) => r.calls, cell: (r) => fmtNum(r.calls, 0) },
+    { key: 'ok', header: 'Succeeded', simple: true, sortValue: (r) => r.ok,
+      cell: (r) => <span className={r.ok === r.calls ? 'pos' : 'neg'}>{fmtNum(r.ok, 0)} / {fmtNum(r.calls, 0)}</span> },
+    { key: 'last_status', header: 'Last HTTP', simple: true, sortValue: (r) => r.last_status,
+      cell: (r) => <span className={r.last_status >= 400 || r.last_status === 0 ? 'neg' : 'pos'}>{r.last_status}</span> },
+    { key: 'last_count', header: 'Records', simple: true, sortValue: (r) => r.last_count, cell: (r) => fmtNum(r.last_count, 0) },
+    { key: 'avg_latency_ms', header: 'Avg ms', simple: true, sortValue: (r) => r.avg_latency_ms, cell: (r) => fmtNum(r.avg_latency_ms, 0) },
+    { key: 'last_ts', header: 'Last call', align: 'l', simple: true, sortValue: (r) => r.last_ts, cell: (r) => fmtEtDate(r.last_ts) },
+  ];
+  const runCols: Column<HealthDetail['runs'][number]>[] = [
+    { key: 'id', header: 'Run', simple: true, sortValue: (r) => r.id, cell: (r) => `#${r.id}` },
+    { key: 'phase', header: 'Phase', align: 'l', simple: true, sortValue: (r) => r.phase, cell: (r) => phaseLabel(r.phase).label },
+    { key: 'status', header: 'Status', align: 'l', simple: true, sortValue: (r) => r.status,
+      cell: (r) => <StatusPill size="sm" {...(RUN_STATUS[r.status] ?? { label: 'Unknown', tone: 'neutral' })} raw={r.status} /> },
+    { key: 'universe', header: 'Universe', simple: true, sortValue: (r) => r.universe, cell: (r) => fmtNum(r.universe, 0) },
+    { key: 'shortlisted', header: 'Shortlist', simple: true, sortValue: (r) => r.shortlisted, cell: (r) => fmtNum(r.shortlisted, 0) },
+    { key: 'enriched', header: 'Enriched', simple: true, sortValue: (r) => r.enriched, cell: (r) => fmtNum(r.enriched, 0) },
+    { key: 'api_calls', header: 'API calls', simple: true, sortValue: (r) => r.api_calls, cell: (r) => fmtNum(r.api_calls, 0) },
+    { key: 'started', header: 'Started', align: 'l', simple: true, sortValue: (r) => r.started, cell: (r) => fmtEtDate(r.started) },
+    { key: 'error', header: 'Error', align: 'l', simple: true, cell: (r) => (r.error ? <span className="neg">{r.error}</span> : '—') },
+  ];
+
   return (
     <>
-      <div className="sect"><h2>System Health</h2>
-        <span className="meta">scheduler phase: {h.scheduler?.phase} · cycle #{h.scheduler?.cycles}</span></div>
+      <SectionHeader level={1} title="System health" question="Is anything broken?"
+        caption={loaded
+          ? `Scan #${cycles ?? '—'} since start · ${phase ? phaseLabel(phase).label : 'phase unknown'} · checked every 15–20 s`
+          : 'Checking…'} />
 
-      <StrategyHealth />
-
-      {h.backup && (
-        <div className="kv" style={{ maxWidth: 380, marginBottom: 12 }}>
-          <div className="k">Database backups</div>
-          <div className="v" style={{ color: h.backup.status === 'OK' ? 'var(--buy)' : h.backup.status === 'NONE' ? 'var(--warn)' : 'var(--risk)' }}>
-            {h.backup.status}{h.backup.latest && <span className="faint" style={{ fontSize: 10, marginLeft: 8 }}>
-              {h.backup.latest} · {h.backup.age_hours}h old · {h.backup.size_mb}MB · {h.backup.count} kept</span>}
-            {h.backup.note && <span className="faint" style={{ fontSize: 10, marginLeft: 8 }}>{h.backup.note}</span>}
+      {/* Verdict */}
+      {!loaded ? (
+        <div className={`${c.verdict} skel-tile`} aria-busy="true">
+          <div className="skel" style={{ height: 28, width: 200 }}>&nbsp;</div>
+          <div className="skel" style={{ height: 14, width: 320 }}>&nbsp;</div>
+        </div>
+      ) : (
+        <div className={c.verdict} role="status">
+          <div>
+            {problems.length === 0
+              ? <StatusPill label="All systems normal" tone="buy" />
+              : <StatusPill label={`${problems.length} problem${problems.length === 1 ? '' : 's'}`} tone="risk" />}
+          </div>
+          {problems.length === 0 ? (
+            <div className={c.line}>Scanner, backups, every strategy and every FMP endpoint checked out.</div>
+          ) : problems.map((p, i) => <div key={i} className={`${c.line} ${c.problem}`}>{p.text}</div>)}
+          <div className={c.row}>
+            <StatusPill size="sm" label={scanner.label} tone={scanner.tone} />
+            <StatusPill size="sm" label={backup.label} tone={backup.tone} />
+            {backup.detail ? <span className={c.hint}>{backup.detail}</span> : null}
           </div>
         </div>
       )}
-      <div className="sect"><h2 style={{ fontSize: 13 }}>FMP plan entitlements</h2>
-        <span className="meta">endpoints probed live against the paid account</span></div>
-      <div className="kv-grid">
-        {Object.entries(h.entitlements).length === 0 && <div className="dim">No probes yet this session.</div>}
-        {Object.entries(h.entitlements).map(([name, e]) => (
-          <div className="kv" key={name}>
-            <div className="k">{name}</div>
-            <div className="v" style={{ color: e.ok ? 'var(--buy)' : 'var(--risk)' }}>
-              {e.ok ? '● available' : `○ not in plan (${e.status})`}
+
+      {/* Strategies */}
+      <SectionHeader title="Every strategy" question="Which strategies are running, and which are idle or failing?"
+        caption={s ? `${countsLine} · a strategy not heard from for ${staleMin} minutes reads Offline` : undefined} />
+      <DataTable<StrategyHealthRow> rows={strategies} columns={stratCols} rowKey={(r) => r.id} loaded={sLoaded}
+        defaultSort={{ key: 'errors', dir: 'desc' }} minWidth={760}
+        suppressedNote={() => 'Signals today hidden — no strategy has scanned anything yet this session'}
+        empty={<EmptyState compact headline="No strategies reported" reason="The scheduler has not published any strategy heartbeat yet." />} />
+      {s ? (
+        <Details summary="What the statuses mean">
+          <div className={c.stack}>
+            {Object.entries(s.legend).map(([k, v]) => (
+              <div key={k} className={c.row}>
+                <StatusPill size="sm" {...modelStatus(k, { paperMode })} raw={k} />
+                <span className={c.line}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </Details>
+      ) : null}
+
+      {/* Entitlements */}
+      <SectionHeader title="Data plan" question="Can the scanner reach every data endpoint it needs?"
+        caption="FMP endpoints probed live against the paid account" />
+      {!hLoaded ? <div className="skel" style={{ height: 40 }} /> : entitlements.length === 0 ? (
+        <EmptyState compact headline="No probes yet this session" reason="Endpoints are probed the first time the scanner needs them." />
+      ) : (
+        <>
+          <div className={c.row}>
+            <StatusPill label={`${entOk} of ${entitlements.length} FMP endpoints available`}
+              tone={entOk === entitlements.length ? 'buy' : 'risk'} />
+          </div>
+          <Details summary="Show every endpoint">
+            <div className={c.stack}>
+              {entitlements.map(([name, e]) => (
+                <div key={name} className={c.row}>
+                  <StatusPill size="sm" label={e.ok ? 'Available' : `Not in plan (HTTP ${e.status})`} tone={e.ok ? 'buy' : 'risk'} />
+                  <span className={c.line}>{name}</span>
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
-      </div>
+          </Details>
+        </>
+      )}
 
-      <div className="sect"><h2 style={{ fontSize: 13 }}>Endpoint freshness — last 6h</h2></div>
-      <div className="tbl-wrap">
-        <table className="tbl" style={{ minWidth: 700 }}>
-          <thead><tr>
-            <th className="l">Provider</th><th className="l">Endpoint</th><th>Calls</th>
-            <th>OK</th><th>Last HTTP</th><th>Records</th><th>Avg ms</th><th className="l">Last call</th>
-          </tr></thead>
-          <tbody>
-            {h.endpoints.map((e, i) => (
-              <tr key={i} style={{ cursor: 'default' }}>
-                <td className="l">{e.provider}</td>
-                <td className="l" style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{e.endpoint}</td>
-                <td>{e.calls}</td>
-                <td className={e.ok === e.calls ? 'pos' : 'neg'}>{e.ok}/{e.calls}</td>
-                <td className={e.last_status >= 400 || e.last_status === 0 ? 'neg' : 'pos'}>{e.last_status}</td>
-                <td>{e.last_count}</td>
-                <td className="dim">{e.avg_latency_ms}</td>
-                <td className="l dim" style={{ fontSize: 12 }}>{fmtEtDate(e.last_ts)}</td>
-              </tr>
-            ))}
-            {h.endpoints.length === 0 && <tr><td colSpan={8} className="l dim">No provider calls in window.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {/* Advanced: endpoint freshness + runs */}
+      <Advanced>
+        <SectionHeader title="Endpoint freshness — last 6 hours" question="Which provider calls are failing or slow?"
+          caption="A run = one full pass over the stock universe" />
+        <DataTable rows={h?.endpoints ?? []} columns={endpointCols} rowKey={(r) => `${r.provider}:${r.endpoint}`}
+          loaded={hLoaded} minWidth={760} dense
+          empty={<EmptyState compact headline="No provider calls in the window" reason="Nothing has been requested from a data provider in the last 6 hours." />} />
 
-      <div className="sect"><h2 style={{ fontSize: 13 }}>Scanner runs</h2></div>
-      <div className="tbl-wrap">
-        <table className="tbl" style={{ minWidth: 700 }}>
-          <thead><tr>
-            <th>Run</th><th className="l">Phase</th><th className="l">Status</th><th>Universe</th>
-            <th>Shortlist</th><th>Enriched</th><th>API calls</th><th className="l">Started</th><th className="l">Error</th>
-          </tr></thead>
-          <tbody>
-            {h.runs.map((r) => (
-              <tr key={r.id} style={{ cursor: 'default' }}>
-                <td>#{r.id}</td>
-                <td className="l">{r.phase}</td>
-                <td className="l"><span className={`badge ${r.status === 'ok' ? 'buy' : r.status === 'error' ? 'risk' : 'neutral'}`}>{r.status}</span></td>
-                <td>{r.universe}</td><td>{r.shortlisted}</td><td>{r.enriched}</td><td>{r.api_calls}</td>
-                <td className="l dim" style={{ fontSize: 12 }}>{fmtEtDate(r.started)}</td>
-                <td className="l neg" style={{ fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.error || ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <SectionHeader title="Scanner runs" question="Did each pass over the universe finish, and how much did it cost?"
+          caption="A run = one full pass over the stock universe" />
+        <DataTable rows={h?.runs ?? []} columns={runCols} rowKey={(r) => String(r.id)} loaded={hLoaded} minWidth={760} dense
+          defaultSort={{ key: 'id', dir: 'desc' }}
+          empty={<EmptyState compact headline="No runs recorded" reason="The scanner has not completed a pass yet." />} />
+      </Advanced>
 
-      <div className="sect"><h2 style={{ fontSize: 13 }}>Recent events</h2></div>
-      <div className="timeline">
-        {h.events.map((e, i) => (
-          <div className="tl-item" key={i}>
-            <span className="tl-time">{fmtEtDate(e.ts)}</span>
-            <span className={`badge ${e.level === 'error' ? 'risk' : e.level === 'warn' ? 'warn' : 'neutral'}`}>{e.component}</span>
-            <span className="dim" style={{ fontSize: 12 }}>{e.message}</span>
-          </div>
-        ))}
-        {h.events.length === 0 && <div className="dim">No events.</div>}
-      </div>
+      {/* Events */}
+      <SectionHeader title="Recent events" question="What has the system logged lately?" />
+      {!hLoaded ? <div className="skel" style={{ height: 120 }} /> : (h?.events?.length ?? 0) === 0 ? (
+        <EmptyState compact headline="No events" reason="Nothing has been logged yet." />
+      ) : (
+        <div className="timeline">
+          {h!.events.map((e, i) => (
+            <div className="tl-item" key={`${e.ts}-${i}`}>
+              <span className="tl-time">{fmtEtDate(e.ts)}</span>
+              <StatusPill size="sm" label={e.component}
+                tone={e.level === 'error' ? 'risk' : e.level === 'warn' || e.level === 'warning' ? 'warn' : 'neutral'} />
+              <span className="dim">{fmtMessage(e.message, advanced)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

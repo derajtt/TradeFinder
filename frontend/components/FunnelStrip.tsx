@@ -1,51 +1,54 @@
 'use client';
-import { usePolling } from '../lib/api';
+import type { Canonical } from '../lib/types';
+import { LIFECYCLE } from '../lib/vocab';
+import s from './today.module.css';
+import { Term } from './ui/Popover';
+import { SectionHeader } from './ui/SectionHeader';
+import { StatusPill } from './ui/StatusPill';
 
-interface Canon {
-  lifecycle_counts: Record<string, number>;
-  totals: Record<string, number>;
-  actionable_buy_performance: { open_positions: number; closed_trades: number;
-    wins: number; losses: number; win_rate: number | null; win_rate_lb: number | null;
-    avg_r: number | null; calibration: string; note: string };
-  versions: Record<string, string>;
-  reconciliation: { equals_total: boolean };
-}
+const CHAIN = ['DISCOVERED', 'EARLY_WATCH', 'QUALIFIED_WATCH', 'ACTIONABLE_BUY'] as const;
+/** "v2.0.0" and "2.0.0" both render as "v2.0.0". */
+const fmtVersion = (v: string | undefined) => (v ? `v${v.replace(/^v/i, '')}` : '—');
+const TAIL = ['REJECTED', 'INVALIDATED', 'EXPIRED', 'CLOSED'] as const;
 
-const ORDER = ['DISCOVERED', 'EARLY_WATCH', 'QUALIFIED_WATCH', 'ACTIONABLE_BUY',
-  'REJECTED', 'INVALIDATED', 'EXPIRED', 'CLOSED'];
-const COLOR: Record<string, string> = {
-  ACTIONABLE_BUY: 'var(--buy)', EARLY_WATCH: 'var(--early)',
-  QUALIFIED_WATCH: 'var(--warn)', REJECTED: 'var(--risk)',
-  INVALIDATED: 'var(--text-faint)', EXPIRED: 'var(--text-faint)',
-};
-
-export default function FunnelStrip({ profile = '' }: { profile?: string }) {
-  const [c] = usePolling<Canon>(`/api/report/canonical?profile=${profile}`, 30000);
-  if (!c) return null;
-  const perf = c.actionable_buy_performance;
+/** Advanced-only pipeline: where today's stocks are, whether the counts
+ *  reconcile, and which engine/filter versions produced them. */
+export default function FunnelStrip({ canonical, loaded, scopeLabel }: {
+  canonical: Canonical | null; loaded: boolean; scopeLabel: string;
+}) {
+  const lc = canonical?.lifecycle_counts ?? {};
+  const n = (k: string) => lc[k] ?? 0;
+  const label = (k: string) => (k === 'ACTIONABLE_BUY' ? 'Buy picks' : LIFECYCLE[k]?.label ?? k);
   return (
-    <div className="tbl-wrap" style={{ padding: '12px 16px', marginBottom: 18 }}>
-      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center', fontSize: 12 }}>
-        <b style={{ fontSize: 11, letterSpacing: 1.2, color: 'var(--text-faint)' }}
-           title="Every total on this page comes from one canonical analytics source — counts always reconcile.">
-          CANONICAL FUNNEL {c.reconciliation.equals_total ? '✓' : '⚠ MISMATCH'}
-        </b>
-        {ORDER.filter((k) => c.lifecycle_counts[k]).map((k) => (
-          <span key={k} className="tb-item">
-            <span className="dot" style={{ background: COLOR[k] ?? 'var(--text-dim)' }} />
-            {k.replace(/_/g, ' ').toLowerCase()} <b>{c.lifecycle_counts[k]}</b>
-          </span>
-        ))}
-        <span className="tb-item">rejected shadow-log <b>{c.totals.rejected_candidates}</b></span>
-        <span className="spacer" style={{ flex: 1 }} />
-        <span className="tb-item" title={perf.note || 'Actionable paper-trade record (live_paper cohort)'}>
-          paper trades <b>{perf.closed_trades}</b>
-          {perf.win_rate != null && <> · WR <b>{(perf.win_rate * 100).toFixed(0)}%</b>
-            <span className="faint">(LB {(perf.win_rate_lb! * 100).toFixed(0)}%)</span></>}
-          <span className="badge warn" style={{ marginLeft: 6 }}>{perf.calibration}</span>
-        </span>
-        <span className="faint" style={{ fontSize: 10 }}>{c.versions.strategy_version}·{c.versions.filter_version}</span>
-      </div>
-    </div>
+    <section aria-labelledby="pipeline-title">
+      <SectionHeader id="pipeline" title={<span id="pipeline-title"><Term k="pipeline">Pipeline</Term></span>}
+        question="Where are today's stocks in the pipeline?" caption={scopeLabel} />
+      {!loaded || !canonical ? (
+        <div className={s.panel} aria-busy="true"><span className={`skel ${s.sk}`} style={{ width: 320 }} /></div>
+      ) : (
+        <div className={s.panel}>
+          <div className={s.chain}>
+            {CHAIN.map((k, i) => (
+              <span key={k} className={s.chain}>
+                {i ? <span className={s.arrow} aria-hidden>→</span> : null}
+                <StatusPill size="sm" tone={LIFECYCLE[k].tone} label={`${label(k)} ${n(k)}`} />
+              </span>
+            ))}
+          </div>
+          <div className={s.gray}>
+            {TAIL.map((k) => <span key={k}>{label(k)} {n(k)}</span>)}
+            <span>· Blocked but still tracked {canonical.totals?.rejected_candidates ?? '—'} (today)</span>
+          </div>
+          <div className={s.gray}>
+            {canonical.reconciliation?.equals_total
+              ? <StatusPill size="sm" tone="buy" label="counts reconcile" />
+              : <StatusPill size="sm" tone="risk" label="counts don't reconcile — see System health" href="/health" />}
+            <span className="faint">
+              engine {fmtVersion(canonical.versions?.strategy_version)} · filters {canonical.versions?.filter_version ?? '—'}
+            </span>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

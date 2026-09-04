@@ -1,0 +1,4 @@
+/* Scorecard — page-local layout only */
+.denom { display: grid; gap: 3px; margin: calc(-1 * var(--sp-3)) 0 var(--sp-4); font-size: var(--fs-note); line-height: 1.5; }
+.mark { margin-left: 6px; }
+.nobreak { margin: var(--sp-4) 0; font-size: var(--fs-body); }

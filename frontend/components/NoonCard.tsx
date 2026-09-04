@@ -1,46 +1,40 @@
 'use client';
-import { usePolling } from '../lib/api';
-import { fmtPrice } from '../lib/format';
+import type { Noon } from '../lib/types';
+import { NOON_CLASS } from '../lib/vocab';
+import s from './today.module.css';
+import { StatusPill, pillFor } from './ui/StatusPill';
 
-interface Noon { policy: string; counts: Record<string, number>;
-  call_win_rate: number | null; win_rate_lb: number | null; denominator: number;
-  note: string; rows: { symbol: string; class: string; call_price: number;
-    reference: number | null; quality: string }[]; }
+const MAX_SYMBOLS = 12;
 
-const CLS: Record<string, [string, string]> = {
-  WIN_10_TOUCH: ['+10% touch', 'buy'], WIN_NOON_GREEN: ['noon green', 'buy'],
-  LOSS_NOON_RED: ['noon red', 'risk'], FLAT: ['flat', 'neutral'],
-  INCOMPLETE: ['incomplete', 'neutral'],
-};
-
-export default function NoonCard() {
-  const [n] = usePolling<Noon>('/api/outcomes/noon', 60000);
-  if (!n || !n.rows?.length) return null;
+/** Advanced-only noon detail under TrustTiles: how the locked picks split by
+ *  class, which symbols they were, and the backend's own note. `policy` is never shown. */
+export default function NoonCard({ noon, loaded }: { noon: Noon | null; loaded: boolean }) {
+  if (!loaded) {
+    return <div className={s.panel} aria-busy="true"><span className={`skel ${s.sk}`} style={{ width: 240 }} /></div>;
+  }
+  if (!noon || !noon.rows?.length) {
+    return <div className={s.panel}><span className={s.noonNote}>Noon check detail · All models — no picks have been locked at noon yet.</span></div>;
+  }
+  const classes = Object.entries(noon.counts ?? {}).filter(([, v]) => v > 0);
+  const symbols = noon.rows.slice(0, MAX_SYMBOLS);
   return (
-    <>
-      <div className="sect" style={{ marginTop: 30 }}>
-        <h2>Locked Noon Outcomes</h2>
-        <span className="meta">{n.policy} — call accuracy from the immutable call price, 7:00 AM→noon; separate from paper P&amp;L</span>
+    <div className={s.panel} aria-label="Noon check detail">
+      <span className="eyebrow">Noon check detail · All models</span>
+      <div className={s.noonRow}>
+        {classes.map(([k, v]) => {
+          const p = pillFor(NOON_CLASS, k);
+          return <StatusPill key={k} size="sm" tone={p.tone} raw={p.raw} label={`${p.label} · ${v}`} />;
+        })}
       </div>
-      <div className="tbl-wrap" style={{ padding: '12px 16px' }}>
-        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5 }}>
-          <span className="tb-item">call win rate <b>{n.call_win_rate != null ? (n.call_win_rate * 100).toFixed(0) + '%' : '—'}</b>
-            {n.win_rate_lb != null && <span className="faint">(LB {(n.win_rate_lb * 100).toFixed(0)}%)</span>}
-            <span className="faint">n={n.denominator}</span></span>
-          {Object.entries(n.counts).filter(([, v]) => v > 0).map(([k, v]) => (
-            <span key={k} className={`badge ${CLS[k]?.[1] ?? 'neutral'}`}>{CLS[k]?.[0] ?? k} ×{v}</span>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-          {n.rows.slice(0, 12).map((r, i) => (
-            <span key={i} className={`badge ${CLS[r.class]?.[1] ?? 'neutral'}`}
-              title={`call ${fmtPrice(r.call_price)} → ref ${fmtPrice(r.reference)} (${r.quality})`}>
-              {r.symbol} · {CLS[r.class]?.[0] ?? r.class}
-            </span>
-          ))}
-        </div>
-        <p className="faint" style={{ fontSize: 10.5, marginTop: 8 }}>{n.note}</p>
+      <div className={s.noonNote}>Most recent {symbols.length} of the {noon.rows.length} latest locked picks:</div>
+      <div className="chips">
+        {symbols.map((r, i) => {
+          const p = pillFor(NOON_CLASS, r.class);
+          return <span key={`${r.symbol}-${i}`} className="chip"><span className="sym">{r.symbol}</span> {p.label}</span>;
+        })}
+        {noon.rows.length > MAX_SYMBOLS ? <span className="chip">+{noon.rows.length - MAX_SYMBOLS} more</span> : null}
       </div>
-    </>
+      {noon.note ? <p className={s.noonNote}>{noon.note}</p> : null}
+    </div>
   );
 }

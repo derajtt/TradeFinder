@@ -1,33 +1,50 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useMarketPhase } from '../lib/status';
+import s from './today.module.css';
+import { MARKET_OPEN_MIN, PREMARKET_START_MIN, etMinutes, parseHm, useEtNow } from './todayShared';
 
-/** Premarket timeline 4:00 → 9:30 ET with the 7:00 broker-window marker. */
-export default function SessionStrip({ confirmAt }: { confirmAt?: string }) {
-  const [now, setNow] = useState<Date>(new Date());
-  useEffect(() => { const id = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(id); }, []);
-  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const mins = et.getHours() * 60 + et.getMinutes();
-  const start = 4 * 60, end = 9 * 60 + 30;
-  if (mins < start - 30 || mins > end + 30) return null;
-  const pct = Math.max(0, Math.min(100, ((mins - start) / (end - start)) * 100));
-  let confirmPct: number | null = null;
-  if (confirmAt && /^\d{1,2}:\d{2}$/.test(confirmAt)) {
-    const [h, m] = confirmAt.split(':').map(Number);
-    const cm = h * 60 + m;
-    if (cm > start && cm < end) confirmPct = ((cm - start) / (end - start)) * 100;
+const SPAN = MARKET_OPEN_MIN - PREMARKET_START_MIN;
+const clamp = (v: number) => Math.max(0, Math.min(100, v));
+
+/** How far into premarket are we, and when can a pick become a Buy?
+ *  `confirmAt` is settings.buy_confirm_after_et — never hard-coded. The 28px row
+ *  is always reserved; outside 3:30–10:00 ET it is a single 12px line. */
+export default function SessionStrip({ confirmAt, loaded }: { confirmAt: string | null; loaded: boolean }) {
+  const now = useEtNow(30000);
+  const phase = useMarketPhase();
+
+  if (!loaded || !now) {
+    return <div className={s.reserved} aria-busy="true"><span className={`skel ${s.sk}`} style={{ width: 280 }} /></div>;
   }
+
+  const buysFrom = confirmAt ? `buys from ${confirmAt} ET` : 'buy time unavailable (settings not loaded)';
+  const mins = etMinutes(now);
+  const inWindow = mins >= PREMARKET_START_MIN - 30 && mins <= MARKET_OPEN_MIN + 30
+    && phase.key !== 'closed' && phase.key !== 'afterhours';
+  if (!inWindow) {
+    return <div className={s.reserved}>Premarket runs 4:00–9:30 AM ET · {buysFrom}</div>;
+  }
+
+  const pct = clamp(((mins - PREMARKET_START_MIN) / SPAN) * 100);
+  const cm = parseHm(confirmAt);
+  const confirmPct = cm !== null && cm > PREMARKET_START_MIN && cm < MARKET_OPEN_MIN
+    ? ((cm - PREMARKET_START_MIN) / SPAN) * 100 : null;
+  const toOpen = Math.max(0, MARKET_OPEN_MIN - mins);
+
   return (
-    <div className="session-strip" aria-label="Premarket session progress">
-      <span>4:00</span>
-      <div className="session-track">
-        <div className="session-fill" style={{ width: `${pct}%` }} />
-        {confirmPct !== null && (
-          <div className="session-marker" style={{ left: `${confirmPct}%` }}
-               data-label={`BUY opens ${confirmAt}`} title={`Broker premarket window opens ${confirmAt} ET — EARLY WATCH converts to BUY after this`} />
-        )}
-        <div className="session-now" style={{ left: `${pct}%` }} title="Now" />
+    <div className={s.sessionWrap}>
+      <div className="session-strip" role="img"
+        aria-label={`${Math.round(pct)}% through premarket, ${toOpen} minutes to market open`}>
+        <div className="session-track">
+          <div className="session-fill" style={{ width: `${pct}%` }} />
+          {confirmPct !== null ? (
+            <div className="session-marker" style={{ left: `${confirmPct}%` }} data-label={`Buys allowed from ${confirmAt}`} />
+          ) : null}
+          <div className="session-now" style={{ left: `${pct}%` }} />
+        </div>
       </div>
-      <span>9:30 open</span>
+      <div className={s.sessionLabels}><span>4:00 AM premarket start</span><span>9:30 AM market open</span></div>
+      <div className={s.sessionCap}>{Math.round(pct)}% through premarket · {toOpen} min to open · {buysFrom}</div>
     </div>
   );
 }

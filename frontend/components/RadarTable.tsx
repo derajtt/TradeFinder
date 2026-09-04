@@ -1,59 +1,58 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { fmtCompact, fmtPct, fmtPrice } from '../lib/format';
+import type { RadarRow } from '../lib/types';
+import { DataTable, type Column } from './ui/DataTable';
+import { SectionHeader } from './ui/SectionHeader';
+import { StatusPill } from './ui/StatusPill';
 
-export interface RadarRow {
-  symbol: string; name: string; exchange: string;
-  price: number | null; gap_pct: number | null; volume: number | null;
-  market_cap: number | null; has_news: boolean; provider_ts: string | null;
-}
+export type { RadarRow } from '../lib/types';
 
-export default function RadarTable({ rows, onSelect }: {
-  rows: RadarRow[]; onSelect: (symbol: string) => void;
+const TOP = 24;
+
+/** Advanced-only, hidden when empty: movers across the full exchange universe
+ *  that are next in line for a closer look. */
+export default function RadarTable({ rows, onSelect, loaded = true }: {
+  rows: RadarRow[]; onSelect: (symbol: string) => void; loaded?: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const visible = useMemo(() => (showAll ? rows : rows.slice(0, 24)), [rows, showAll]);
-  if (!rows.length) return null;
-  return (
-    <>
-      <div className="sect" style={{ marginTop: 34 }}>
-        <h2>Radar</h2>
-        <span className="meta">
-          {rows.length} more movers across the full exchange universe — next in line for enrichment
+  const visible = useMemo(() => (showAll ? rows : rows.slice(0, TOP)), [rows, showAll]);
+
+  const columns = useMemo<Column<RadarRow>[]>(() => [
+    { key: 'symbol', header: 'Stock', align: 'l', sortValue: (r) => r.symbol,
+      cell: (r) => (
+        <span className="stock-cell">
+          <span className="sym">{r.symbol}</span>
+          {r.name ? <span className="co-name">{r.name}</span> : null}
         </span>
-        <span className="spacer" />
-        {rows.length > 24 && (
-          <button className="btn" onClick={() => setShowAll((s) => !s)}>
-            {showAll ? 'Show top 24' : `Show all ${rows.length}`}
+      ) },
+    { key: 'price', header: 'Price', sortValue: (r) => r.price, cell: (r) => fmtPrice(r.price) },
+    { key: 'gap_pct', header: 'Gap', term: 'gap', sortValue: (r) => r.gap_pct,
+      cell: (r) => <span className={(r.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'}>{fmtPct(r.gap_pct)}</span> },
+    { key: 'volume', header: 'Day volume', sortValue: (r) => r.volume, cell: (r) => fmtCompact(r.volume) },
+    { key: 'market_cap', header: 'Market cap', term: 'mkt_cap', sortValue: (r) => r.market_cap,
+      cell: (r) => (r.market_cap != null ? '$' + fmtCompact(r.market_cap) : '—') },
+    { key: 'has_news', header: 'News', align: 'l', sortValue: (r) => (r.has_news ? 1 : 0),
+      cell: (r) => (r.has_news ? <StatusPill size="sm" tone="accent" label="News" /> : '—') },
+    { key: 'exchange', header: 'Exchange', align: 'l', sortValue: (r) => r.exchange,
+      cell: (r) => <span className="faint">{r.exchange || '—'}</span> },
+  ], []);
+
+  if (!loaded || !rows.length) return null;
+  return (
+    <section aria-labelledby="radar-title">
+      <SectionHeader id="radar" title={<span id="radar-title">Radar</span>} count={rows.length}
+        question="Which other movers are next in line for a closer look?"
+        caption="All models · movers across the full exchange universe · not yet checked against the rules"
+        right={rows.length > TOP ? (
+          <button type="button" className="btn sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? `Show top ${TOP}` : `Show all ${rows.length}`}
           </button>
-        )}
-      </div>
-      <div className="tbl-wrap">
-        <table className="tbl" style={{ minWidth: 760 }}>
-          <thead><tr>
-            <th className="l">Symbol</th><th>Price</th><th>Gap%</th>
-            <th>Day Vol</th><th>Mkt Cap</th><th className="l">News</th><th className="l">Exch</th>
-          </tr></thead>
-          <tbody>
-            {visible.map((r) => (
-              <tr key={r.symbol} onClick={() => onSelect(r.symbol)} tabIndex={0} role="button"
-                  onKeyDown={(e) => e.key === 'Enter' && onSelect(r.symbol)}
-                  aria-label={`Open ${r.symbol} details`}>
-                <td className="l">
-                  <span className="sym">{r.symbol}</span>
-                  <div className="co-name">{r.name}</div>
-                </td>
-                <td>{fmtPrice(r.price)}</td>
-                <td className={(r.gap_pct ?? 0) >= 0 ? 'pos' : 'neg'}>{fmtPct(r.gap_pct)}</td>
-                <td>{fmtCompact(r.volume)}</td>
-                <td>{r.market_cap != null ? '$' + fmtCompact(r.market_cap) : '—'}</td>
-                <td className="l">{r.has_news ? <span className="badge src">news</span> : <span className="faint">—</span>}</td>
-                <td className="l faint" style={{ fontSize: 11 }}>{r.exchange}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+        ) : undefined} />
+      <DataTable<RadarRow>
+        rows={visible} columns={columns} rowKey={(r) => r.symbol}
+        onRowClick={(r) => onSelect(r.symbol)} defaultSort={{ key: 'gap_pct', dir: 'desc' }}
+        loaded={loaded} minWidth={760} />
+    </section>
   );
 }

@@ -1,73 +1,59 @@
 'use client';
-import { useState } from 'react';
-import { usePolling } from '../lib/api';
+import { fmtEtShort } from '../lib/format';
+import { useOps } from '../lib/status';
+import { LANE_STATE } from '../lib/vocab';
+import s from './today.module.css';
+import { eventLabel, plainProse } from './todayShared';
+import { Term } from './ui/Popover';
+import { SectionHeader } from './ui/SectionHeader';
+import { StatusPill, pillFor } from './ui/StatusPill';
 
-interface Ops {
-  now_et: string; phase: string; regime_text?: string; quiet_reason?: string | null;
-  lanes: { lane: string; state: string; detail: string }[];
-  upcoming: { event: string; at_et: string }[];
-  not_running: { what: string; why: string }[];
-}
-
-const GOOD = ['RUNNING', 'OPEN', 'RUNNING 24/7', 'DONE TODAY', 'TREND', 'RANGE'];
-const WARN = ['SCHEDULED', 'DAILY MODELS ONLY', 'UNCERTAIN', 'IDLE (no session)'];
-
-function chipClass(state: string) {
-  if (GOOD.includes(state)) return 'buy';
-  if (WARN.includes(state)) return 'warn';
-  if (state === 'CLOSED' || state === 'HIGH_RISK') return 'risk';
-  return 'neutral';
-}
-
+/** Advanced-only system detail from `/api/ops` (shared 30s poll): market type,
+ *  every lane's state, what runs next, and what is deliberately off. */
 export default function OpsPanel() {
-  const [ops] = usePolling<Ops>('/api/ops', 30000);
-  const [open, setOpen] = useState(true);
-  if (!ops) return null;
+  const { ops, loaded } = useOps();
   return (
-    <div className="tbl-wrap" style={{ padding: '12px 16px', marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <b style={{ fontSize: 11, letterSpacing: 1.4, color: 'var(--text-faint)' }}>
-          OPERATIONS — WHAT'S HAPPENING RIGHT NOW
-        </b>
-        <span className="spacer" style={{ flex: 1 }} />
-        <button className="ptab" style={{ padding: '2px 10px', fontSize: 10 }}
-          onClick={() => setOpen((o) => !o)}>{open ? 'collapse' : 'expand'}</button>
-      </div>
-      {open && (
-        <>
-          {(ops.regime_text || ops.quiet_reason) && (
-            <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-              {ops.regime_text && <span>🧭 {ops.regime_text} </span>}
-              {ops.quiet_reason && <span className="faint">· {ops.quiet_reason}</span>}
-            </div>
-          )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 8, marginTop: 10 }}>
+    <section aria-labelledby="sysdetail-title">
+      <SectionHeader id="system" title={<span id="sysdetail-title">System detail</span>}
+        question="What is each part of the system doing right now, and what is deliberately off?"
+        caption="All models · reported by the scheduler" />
+      {!loaded || !ops ? (
+        <div className={s.panel} aria-busy="true"><span className={`skel ${s.sk}`} style={{ width: 320 }} /></div>
+      ) : (
+        <div className={s.panel}>
+          <div><Term k="regime">Market type</Term>: {ops.regime_text ? plainProse(ops.regime_text) : <span className="dim">not reported</span>}</div>
+
+          <div className={s.lanes}>
             {ops.lanes.map((l) => (
-              <div key={l.lane} className="gate" style={{ alignItems: 'flex-start' }} title={l.detail}>
-                <span style={{ fontSize: 12 }}>{l.lane}
-                  <div className="faint" style={{ fontSize: 10, marginTop: 2, whiteSpace: 'normal' }}>{l.detail}</div>
+              <div key={l.lane} className={s.lane}>
+                <span>
+                  {plainProse(l.lane)}
+                  {l.detail ? <div className={s.laneDetail}>{plainProse(l.detail)}</div> : null}
                 </span>
-                <span className={`badge ${chipClass(l.state)}`} style={{ flexShrink: 0 }}>{l.state}</span>
+                <StatusPill size="sm" {...pillFor(LANE_STATE, l.state)} />
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 12, alignItems: 'baseline' }}>
-            <b style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--text-faint)' }}>NEXT UP</b>
-            {ops.upcoming.map((u, i) => (
-              <span key={i} className="tb-item" style={{ fontSize: 11.5 }}>
-                <b>{new Date(u.at_et).toLocaleString('en-US', { timeZone: 'America/New_York',
-                  weekday: 'short', hour: 'numeric', minute: '2-digit' })}</b> {u.event}
-              </span>
-            ))}
+
+          <div>
+            <span className="eyebrow">Next up</span>
+            <div className={s.list}>
+              {ops.upcoming.map((u, i) => (
+                <span key={i}><b>{fmtEtShort(u.at_et)}</b> {eventLabel(u.event)}</span>
+              ))}
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8 }}>
-            <b style={{ fontSize: 10, letterSpacing: 1.2, color: 'var(--text-faint)' }}>INTENTIONALLY OFF</b>
-            {ops.not_running.map((n, i) => (
-              <span key={i} className="faint" style={{ fontSize: 10.5 }} title={n.why}>◦ {n.what}</span>
-            ))}
+
+          <div>
+            <span className="eyebrow">Intentionally off</span>
+            <div className={s.list}>
+              {ops.not_running.map((x, i) => (
+                <span key={i}>{x.what} <small>— {plainProse(x.why)}</small></span>
+              ))}
+            </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </section>
   );
 }

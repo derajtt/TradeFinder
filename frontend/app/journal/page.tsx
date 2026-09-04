@@ -1,62 +1,107 @@
 'use client';
 import { useState } from 'react';
-import { apiGet, usePolling } from '../../lib/api';
-import { fmtEtDate } from '../../lib/format';
-import { API_BASE, API_KEY } from '../../lib/api';
-
-interface Entry { id: number; created_at: string; symbol: string; signal_uid: string;
-  note: string; tags: string[]; rules_followed: boolean; review: string; }
+import DetailDrawer from '../../components/DetailDrawer';
+import { EmptyState, SectionHeader, StatusPill, Tip } from '../../components/ui';
+import { apiPostBody, usePollingState } from '../../lib/api';
+import { fmtEtShort } from '../../lib/format';
+import type { JournalEntry } from '../../lib/types';
 
 export default function JournalPage() {
-  const [resp, , reload] = usePolling<{ rows: Entry[] }>('/api/journal', 60000);
+  const { data, loaded, reload } = usePollingState<{ rows: JournalEntry[] }>('/api/journal', 60000);
   const [note, setNote] = useState('');
   const [symbol, setSymbol] = useState('');
   const [tags, setTags] = useState('');
   const [rules, setRules] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(null);
+
+  const rows = data?.rows ?? [];
   const save = async () => {
-    if (!note.trim()) return;
-    await fetch(`${API_BASE}/api/journal`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
-      body: JSON.stringify({ note, symbol, rules_followed: rules,
-        tags: tags.split(',').map((t) => t.trim()).filter(Boolean) }) });
-    setNote(''); setSymbol(''); setTags(''); reload();
+    if (!note.trim() || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      await apiPostBody('/api/journal', {
+        note, symbol: symbol.trim().toUpperCase(), rules_followed: rules,
+        tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+      });
+      setNote(''); setSymbol(''); setTags(''); setRules(true);
+      reload();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
+
   return (
     <>
-      <div className="sect"><h2>Trade Journal</h2>
-        <span className="meta">notes joined to signals and symbols — review what you did vs what the rules said</span></div>
-      <div className="tbl-wrap" style={{ padding: '14px 16px', marginBottom: 14 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input placeholder="Symbol (optional)" value={symbol} onChange={(e) => setSymbol(e.target.value)}
-            style={{ width: 120, background: 'var(--bg-panel)', border: '1px solid var(--line)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px' }} />
-          <input placeholder="tags, comma,separated" value={tags} onChange={(e) => setTags(e.target.value)}
-            style={{ width: 200, background: 'var(--bg-panel)', border: '1px solid var(--line)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px' }} />
-          <label className="check" style={{ padding: 0 }}>
-            <input type="checkbox" checked={rules} onChange={(e) => setRules(e.target.checked)} />
-            <span className="dim" style={{ fontSize: 12 }}>rules followed</span>
-          </label>
-        </div>
-        <textarea placeholder="What happened, what you saw, what you'd do differently…"
-          value={note} onChange={(e) => setNote(e.target.value)} rows={3}
-          style={{ width: '100%', marginTop: 8, background: 'var(--bg-panel)', border: '1px solid var(--line)', color: 'var(--text)', borderRadius: 8, padding: '9px 12px', fontFamily: 'var(--sans)', fontSize: 13 }} />
-        <div className="btn-row" style={{ marginTop: 8 }}>
-          <button className="btn primary" onClick={save}>Save entry</button>
-        </div>
-      </div>
-      <div className="timeline">
-        {(resp?.rows ?? []).map((e) => (
-          <div className="tl-item" key={e.id}>
-            <span className="tl-time">{fmtEtDate(e.created_at)}</span>
-            <span style={{ flex: 1 }}>
-              {e.symbol && <span className="sym" style={{ marginRight: 8 }}>{e.symbol}</span>}
-              {!e.rules_followed && <span className="badge risk" style={{ marginRight: 6 }}>rules broken</span>}
-              {e.tags.map((t) => <span key={t} className="badge src" style={{ marginRight: 4 }}>{t}</span>)}
-              <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{e.note}</div>
-            </span>
+      <SectionHeader level={1} title="My journal"
+        question="What did I do, and did I follow my plan?"
+        caption="Your notes, tied to stocks and picks — compare what you did with what the rules said." />
+
+      <form className="tbl-wrap" style={{ padding: '14px 16px', marginBottom: 14 }}
+        onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor="jr-symbol">Stock (optional)</label>
+            <input id="jr-symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)}
+              placeholder="e.g. ABUS" autoComplete="off" />
           </div>
-        ))}
-        {!(resp?.rows ?? []).length && <div className="empty"><b>No entries yet</b>Your first note starts the journal.</div>}
-      </div>
+          <div className="field">
+            <label htmlFor="jr-tags">Tags</label>
+            <input id="jr-tags" value={tags} onChange={(e) => setTags(e.target.value)}
+              placeholder="comma-separated" autoComplete="off" />
+            <span className="hint">Short words you can filter by later, separated by commas.</span>
+          </div>
+          <div className="field">
+            <span className="row" style={{ gap: 4 }}>
+              <label htmlFor="jr-rules">Rules followed</label>
+              <Tip label="rules followed" text="Tick this if you took the trade (or skipped it) the way your plan said. Untick it to record a deviation." />
+            </span>
+            <label className="switch" style={{ padding: '9px 0' }}>
+              <input id="jr-rules" type="checkbox" checked={rules} onChange={(e) => setRules(e.target.checked)} />
+              <span>{rules ? 'Yes — I followed my plan' : 'No — I deviated from my plan'}</span>
+            </label>
+            <span className="hint">Did you follow your plan?</span>
+          </div>
+        </div>
+        <div className="field" style={{ marginTop: 12 }}>
+          <label htmlFor="jr-note">Note</label>
+          <textarea id="jr-note" className="input sans" rows={3}
+            placeholder="What happened, what you saw, what you'd do differently…"
+            value={note} onChange={(e) => setNote(e.target.value)} style={{ width: '100%', resize: 'vertical' }} />
+        </div>
+        <div className="btn-row" style={{ marginTop: 12 }}>
+          <button type="submit" className="btn primary" disabled={busy || !note.trim()}>{busy ? 'Saving…' : 'Save entry'}</button>
+          {err ? <span className="err-box" style={{ margin: 0, padding: '6px 10px' }}>{err}</span> : null}
+        </div>
+      </form>
+
+      <SectionHeader title="Entries" count={loaded ? rows.length : null} question="What have I written so far?" />
+      {!loaded ? (
+        <EmptyState loaded={false} headline="Loading entries" reason={null} />
+      ) : rows.length === 0 ? (
+        <EmptyState headline="No entries yet" reason="Nothing has been written in this journal yet."
+          next="Your first note starts the journal." />
+      ) : (
+        <div className="timeline">
+          {rows.map((e) => (
+            <div className="tl-item" key={e.id}>
+              <span className="tl-time">{fmtEtShort(e.created_at)}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="chips" style={{ alignItems: 'center' }}>
+                  {e.symbol ? <span className="sym">{e.symbol}</span> : null}
+                  {e.signal_uid && e.symbol ? (
+                    <button type="button" className="chip chip--early" onClick={() => setSel(e.symbol)}>about {e.symbol} pick</button>
+                  ) : null}
+                  {!e.rules_followed ? <StatusPill size="sm" label="Plan not followed" tone="risk" /> : null}
+                  {(e.tags ?? []).map((t) => <span key={t} className="chip">{t}</span>)}
+                </div>
+                <div style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{e.note}</div>
+                {e.review ? <div className="note" style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>Review: {e.review}</div> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {sel ? <DetailDrawer symbol={sel} onClose={() => setSel(null)} /> : null}
     </>
   );
 }

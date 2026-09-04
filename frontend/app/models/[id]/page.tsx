@@ -1,145 +1,257 @@
 'use client';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import DetailDrawer from '../../../components/DetailDrawer';
-import SignalTable from '../../../components/SignalTable';
-import { usePolling } from '../../../lib/api';
-import { fmtPrice } from '../../../lib/format';
-import type { SignalRow } from '../../../lib/types';
+import {
+  Advanced, DataTable, EmptyState, SectionHeader, SignalTable, StatTile, StatusPill, Term, pillFor, type Column,
+} from '../../../components/ui';
+import { usePollingState } from '../../../lib/api';
+import { fmtDrawdown, fmtEtShort, fmtPct, fmtPrice, fmtR } from '../../../lib/format';
+import { useMode } from '../../../lib/mode';
+import { useStatus } from '../../../lib/status';
+import type { ModelsPayload, Position, SignalRow } from '../../../lib/types';
+import { LIFECYCLE, POSITION_STATUS, humanKey } from '../../../lib/vocab';
+import s from './page.module.css';
 
-interface ModelInfo { id: string; name: string; color: string; edge: string;
-  universe: string; horizon: string; cadence: string; asset_classes: string[];
-  experimental?: boolean; data_notes?: string; hypothesis?: string; enabled: boolean;
-  custom?: boolean; requires?: string[];
-  account: { cash: number; equity: number; realized_pnl: number; return_pct: number;
-    max_drawdown_pct: number; trades_closed: number; wins: number };
-  signals: Record<string, number>; }
+type Tab = 'picks' | 'trades' | 'about';
+type Sort = 'time' | 'score' | 'change' | 'symbol';
+const SORT_LABEL: Record<Sort, string> = { score: 'Score', change: 'Move since pick', time: 'Newest', symbol: 'Stock' };
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'picks', label: 'Picks' }, { key: 'trades', label: 'Paper trades' }, { key: 'about', label: 'About' },
+];
+const QUESTION = 'What does this strategy look for, and how is its paper account doing?';
+
+/* /api/reversion/signals row fields this page reads (Extreme Reversion keeps its own table). */
+interface ReversionSignal {
+  signal_uid: string; symbol: string; confirmed_at: string; entry: number; score: number | null;
+  status: string; variant: string; stop?: number | null; targets?: { price?: number }[];
+}
+/** Map the richer reversion rows onto the shared signal shape so one table serves every finder. */
+function fromReversion(rows: ReversionSignal[]): SignalRow[] {
+  return rows.map((r) => ({
+    signal_uid: r.signal_uid, symbol: r.symbol, initiated_at: r.confirmed_at, buy_price: r.entry,
+    current: r.entry, score: r.score, lifecycle: r.status, profile: r.variant, status: r.status,
+    stop: r.stop, target1: r.targets?.[0]?.price, target2: r.targets?.[1]?.price,
+  })) as unknown as SignalRow[];
+}
+
+function tradesWord(n: number): string {
+  return `${n} ${n === 1 ? 'trade' : 'trades'}`;
+}
 
 export default function ModelPage() {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
-  const [sort, setSort] = useState<'time' | 'score' | 'change' | 'symbol'>('score');
+  const { id } = useParams<{ id: string }>();
+  const [sort, setSort] = useState<Sort>('score');
   const [dedupe, setDedupe] = useState(true);
-  const [resp] = usePolling<{ models: ModelInfo[]; regime: any }>('/api/models', 30000);
+  const [tab, setTab] = useState<Tab>('picks');
+  const [sel, setSel] = useState<string | null>(null);
+  const { status } = useStatus();
+  const { advanced } = useMode();
+  const paperMode = status?.paper_mode;
+
+  const models = usePollingState<ModelsPayload>('/api/models', 30000);
   // Extreme Reversion records into its own table, not buy_signals — querying
   // by profile there would always come back empty.
   const ownTable = id === 'extreme_reversion';
-  const [sigResp] = usePolling<{ rows?: SignalRow[]; signals?: any[] }>(
+  const sig = usePollingState<{ rows?: SignalRow[]; signals?: ReversionSignal[] }>(
     ownTable ? '/api/reversion/signals?limit=200'
-             : `/api/signals?profile=${id}&limit=200&dedupe=${dedupe ? 1 : 0}&sort=${sort}`,
+      : `/api/signals?profile=${encodeURIComponent(id)}&limit=200&dedupe=${dedupe ? 1 : 0}&sort=${sort}`,
     30000);
-  const [posResp] = usePolling<{ rows: any[] }>(`/api/positions?profile=${id}`, 30000);
-  const [tab, setTab] = useState<'overview' | 'signals' | 'positions'>('overview');
-  const [sel, setSel] = useState<string | null>(null);
-  const m = useMemo(() => resp?.models.find((x) => x.id === id), [resp, id]);
-  // Extreme Reversion stores richer rows in its own table; map them onto the
-  // shared signal shape so one table component serves every finder.
-  const sigRows: SignalRow[] = useMemo(() => {
-    if (!ownTable) return (sigResp?.rows ?? []) as SignalRow[];
-    return (sigResp?.signals ?? []).map((r: any) => ({
-      signal_uid: r.signal_uid, symbol: r.symbol,
-      initiated_at: r.confirmed_at, buy_price: r.entry,
-      current: r.entry, score: r.score, lifecycle: r.status,
-      profile: r.variant, status: r.status,
-      stop: r.stop,
-      target1: (r.targets?.[0] || {}).price,
-      target2: (r.targets?.[1] || {}).price,
-    })) as unknown as SignalRow[];
-  }, [ownTable, sigResp]);
-  if (!m) return <div className="skel" style={{ height: 300, marginTop: 20 }} />;
+  const pos = usePollingState<{ rows: Position[] }>(`/api/positions?profile=${encodeURIComponent(id)}`, 30000);
+
+  const m = useMemo(() => models.data?.models.find((x) => x.id === id), [models.data, id]);
+  const sigRows = useMemo<SignalRow[]>(
+    () => (ownTable ? fromReversion(sig.data?.signals ?? []) : (sig.data?.rows ?? [])),
+    [ownTable, sig.data]);
+  // "Now" for a paper trade comes from the tracked signal rows of the same stock.
+  const liveBySymbol = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (const r of sigRows) if (!map.has(r.symbol)) map.set(r.symbol, r.current);
+    return map;
+  }, [sigRows]);
+
+  // §2.7 Simple columns; Advanced adds Size, Remaining, Exit reason, Opened, Engine version.
+  const posCols = useMemo<Column<Position>[]>(() => [
+    { key: 'symbol', header: 'Stock', align: 'l', simple: true, sortValue: (p) => p.symbol,
+      cell: (p) => <span className="sym">{p.symbol}</span> },
+    { key: 'entry_fill', header: 'Bought at', simple: true, sortValue: (p) => p.entry_fill,
+      cell: (p) => fmtPrice(p.entry_fill) },
+    { key: 'now', header: 'Now', simple: true,
+      cell: (p) => fmtPrice(liveBySymbol.get(p.symbol) ?? null),
+      isEmpty: (p) => liveBySymbol.get(p.symbol) == null },
+    { key: 'stop', header: 'Stop', simple: true, cell: (p) => fmtPrice(p.stop) },
+    { key: 'targets', header: 'Targets', simple: true,
+      isEmpty: (p) => p.target1 == null && p.target2 == null,
+      cell: (p) => `${fmtPrice(p.target1)} / ${fmtPrice(p.target2)}` },
+    { key: 'realized_r', header: <Term k="r_multiple">Result so far</Term>, simple: true, sortValue: (p) => p.realized_r,
+      cell: (p) => (
+        <span className={p.realized_r > 0 ? 'pos' : p.realized_r < 0 ? 'neg' : undefined}>{fmtR(p.realized_r, 2)}</span>
+      ) },
+    { key: 'status', header: 'Status', align: 'l', simple: true, sortValue: (p) => p.status,
+      cell: (p) => <StatusPill size="sm" {...pillFor(POSITION_STATUS, p.status)} /> },
+    // ── Advanced-only from here ──
+    { key: 'size_usd', header: 'Size', sortValue: (p) => p.size_usd ?? null, cell: (p) => fmtPrice(p.size_usd) },
+    { key: 'remaining_frac', header: 'Remaining',
+      cell: (p) => (p.remaining_frac == null ? '—' : `${Math.round(p.remaining_frac * 100)}%`) },
+    { key: 'exit_reason', header: 'Exit reason', align: 'l', cell: (p) => (p.exit_reason ? humanKey(p.exit_reason) : '—') },
+    { key: 'opened_at', header: 'Opened', align: 'l', sortValue: (p) => p.opened_at, cell: (p) => fmtEtShort(p.opened_at) },
+    { key: 'strategy_version', header: 'Engine version', align: 'l',
+      cell: (p) => (p.strategy_version ? <code>engine v{p.strategy_version}</code> : '—') },
+  ], [liveBySymbol]);
+
+  if (!models.loaded) {
+    return (
+      <>
+        <SectionHeader level={1} title="Strategy" question={QUESTION} />
+        <div className="stat-grid">
+          {[0, 1, 2, 3].map((i) => (
+            <StatTile key={i} label="Loading" value={null} n={null} source="Paper account" evidence="PAPER" loaded={false} />
+          ))}
+        </div>
+      </>
+    );
+  }
+  if (!m) {
+    return (
+      <>
+        <SectionHeader level={1} title="Strategy not found" question={QUESTION} />
+        <EmptyState tone="warn" headline="No strategy with this id"
+          reason={models.err ? models.err.message : `"${id}" is not in the strategy registry.`}
+          action={{ label: 'All strategies', href: '/competition' }} />
+      </>
+    );
+  }
+
   const a = m.account;
+  const n = a.trades_closed;
+  const sigTotal = Object.values(m.signals).reduce((x, y) => x + y, 0);
+  const buys = m.signals.ACTIONABLE_BUY ?? 0;
+  const watching = (m.signals.QUALIFIED_WATCH ?? 0) + (m.signals.EARLY_WATCH ?? 0);
+  const legacy = m.signals.legacy ?? 0;
+  const scope = `${m.name} model`;
+  const breakdown = Object.entries(m.signals).map(([k, v]) => (
+    <span key={k}>
+      {k === 'legacy' ? <Term k="legacy_bucket">other</Term> : (LIFECYCLE[k]?.label ?? humanKey(k))} {v}
+    </span>
+  ));
+  const posRows = pos.data?.rows ?? [];
+
   return (
     <>
-      <div className="model-hero" style={{ borderLeftColor: m.color, margin: '6px 0 18px' }}>
-        <div className="sect" style={{ margin: 0 }}>
-          <h2 style={{ color: m.color }}>{m.name}
-            {m.experimental && <span className="badge est" style={{ marginLeft: 8 }}>EXPERIMENTAL</span>}
-            {!m.enabled && <span className="badge neutral" style={{ marginLeft: 8 }}>DISABLED</span>}
-          </h2>
-        </div>
-        <p className="dim" style={{ margin: '6px 0 2px', maxWidth: '75ch' }}>{m.edge}.</p>
-        {m.requires?.length ? (
-          <p className="faint" style={{ fontSize: 12, margin: '2px 0' }}>
-            Requires ALL of: {m.requires.map((r) => (
-              <span key={r} className="badge neutral" style={{ marginRight: 5 }}>{r.replace(/_/g, ' ')}</span>
-            ))} on the same symbol today.
-          </p>
-        ) : null}
-        <p className="faint" style={{ fontSize: 12 }}>
-          {m.universe} · {m.horizon} · cadence: {m.cadence} · {m.asset_classes.join(' + ')}
-        </p>
-        {m.data_notes && <p className="faint" style={{ fontSize: 12 }}>⚠ data: {m.data_notes}</p>}
-        {m.hypothesis && <p className="faint" style={{ fontSize: 12, maxWidth: '80ch' }}>hypothesis: {m.hypothesis}</p>}
+      <SectionHeader level={1}
+        title={
+          <>
+            <span style={{ color: m.color }}>Strategy: {m.name}</span>
+            {m.experimental ? <span className={`dim ${s.word}`}>experimental</span> : null}
+            {!m.enabled ? <StatusPill label="Off" tone="neutral" raw="DISABLED" /> : null}
+          </>
+        }
+        question={QUESTION}
+        caption={`${m.universe} · ${m.horizon} · ${m.cadence} · ${(m.asset_classes ?? []).join(' + ')}`}
+        right={<Link className="btn sm" href="/competition">All strategies</Link>} />
+
+      {/* Drawdown basis: `/api/models account.max_drawdown_pct` → 'account' (spec §7.5). */}
+      <div className="stat-grid">
+        <StatTile label="Paper account" term="paper" value={fmtPrice(a.equity)} n={n}
+          nLabel={n > 0 ? `of $10,000 start · ${tradesWord(n)}` : undefined}
+          source={`Paper account · ${scope}`} evidence="PAPER" paperMode={paperMode}
+          sub={<>Worst dip {fmtDrawdown(a.max_drawdown_pct, 'account')}</>} />
+        <StatTile label="Return" n={n}
+          value={<span className={a.return_pct >= 0 ? 'pos' : 'neg'}>{fmtPct(a.return_pct)}</span>}
+          nLabel={n > 0 ? `${tradesWord(n)} · paper` : undefined}
+          source={`Paper account · ${scope} · since the $10,000 start`} evidence="PAPER" paperMode={paperMode}
+          sub={advanced ? `Cash ${fmtPrice(a.cash)} · realized ${fmtPrice(a.realized_pnl)}` : undefined} />
+        <StatTile label="Closed trades" value={n} n={n}
+          nLabel={n > 0 ? `${a.wins} won · ${Math.max(0, n - a.wins)} lost` : undefined}
+          source={`Paper account · ${scope}`} evidence="PAPER" paperMode={paperMode} />
+        <StatTile label="Picks" value={sigTotal} n={sigTotal} unit="picks"
+          nLabel={sigTotal > 0 ? (
+            <>all time · {buys} buys · {watching} watching
+              {legacy ? <> · {legacy} <Term k="legacy_bucket">other</Term></> : null}</>
+          ) : undefined}
+          source={`Tracked picks · ${scope} · every state, all sessions`} evidence="TRACKED"
+          sub={advanced && sigTotal > 0 ? <span className={s.breakdown}>{breakdown}</span> : undefined} />
       </div>
 
-      <div className="cards" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
-        <div className="card"><h3>Equity</h3><div className="big">{fmtPrice(a.equity)}</div>
-          <div className="sub">of $10,000 start</div></div>
-        <div className="card"><h3>Return</h3>
-          <div className={`big ${a.return_pct >= 0 ? 'pos' : 'neg'}`}>{a.return_pct >= 0 ? '+' : ''}{a.return_pct}%</div>
-          <div className="sub">live paper cohort</div></div>
-        <div className="card"><h3>Trades</h3><div className="big">{a.trades_closed}</div>
-          <div className="sub">{a.wins} wins · dd {a.max_drawdown_pct}%</div></div>
-        <div className="card"><h3>Signals</h3>
-          <div className="big">{Object.values(m.signals).reduce((x, y) => x + y, 0)}</div>
-          <div className="sub">{Object.entries(m.signals).map(([k, v]) => `${k.toLowerCase()} ${v}`).join(' · ') || 'none yet'}</div></div>
-      </div>
-
-      <div className="ptabs">
-        {(['overview', 'signals', 'positions'] as const).map((t) => (
-          <button key={t} className={`ptab ${tab === t ? 'active' : ''}`}
-            onClick={() => setTab(t)}>{t}</button>
+      <div className="ptabs" role="tablist" aria-label="Strategy sections">
+        {TABS.map((t) => (
+          <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+            className={`ptab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
+            {t.label}
+            {t.key === 'trades' && pos.loaded ? <span className={`dim ${s.tabCount}`}>{posRows.length}</span> : null}
+          </button>
         ))}
       </div>
 
-      {tab === 'signals' && (
-        <>
-          <div className="row" style={{ gap: 7, marginBottom: 10, alignItems: 'center' }}>
-            <span className="meta">Sort</span>
-            {(['score', 'change', 'time', 'symbol'] as const).map((k) => (
-              <button key={k} className={`tab ${sort === k ? 'on' : ''}`}
-                onClick={() => setSort(k)} disabled={ownTable}>
-                {k === 'change' ? 'move %' : k}
+      {tab === 'picks' ? (
+        <section aria-label="Picks">
+          <div className={s.controls}>
+            <span className="dim">Sort</span>
+            {(Object.keys(SORT_LABEL) as Sort[]).map((k) => (
+              <button key={k} type="button" className={`tab ${sort === k ? 'on' : ''}`}
+                aria-pressed={sort === k} disabled={ownTable} onClick={() => setSort(k)}>
+                {SORT_LABEL[k]}
               </button>
             ))}
-            <button className={`tab ${dedupe ? 'on' : ''}`} onClick={() => setDedupe((d) => !d)}
-              disabled={ownTable}
-              title="The lifecycle table stores one row per profile per state per day, so the same symbol repeats. This collapses to one row each.">
-              {dedupe ? '✓ one row per symbol' : 'show every record'}
+            <button type="button" className={`tab ${dedupe ? 'on' : ''}`} aria-pressed={dedupe}
+              disabled={ownTable} onClick={() => setDedupe((d) => !d)}>
+              {dedupe ? 'One row per stock: on' : 'One row per stock: off'}
             </button>
-            <span className="meta" style={{ marginLeft: 'auto' }}>
-              {sigRows.length} rows
-            </span>
+            {sig.loaded ? (
+              <span className={`dim ${s.counter}`}>
+                {ownTable ? `${sigRows.length} records`
+                  : dedupe ? `${sigRows.length} stocks (one row per stock)`
+                  : `${sigRows.length} records (every state change)`}
+              </span>
+            ) : null}
           </div>
-          <SignalTable rows={sigRows} onSelect={(s) => setSel(s.symbol)} />
-        </>
-      )}
-      {tab === 'positions' && (
-        <div className="tbl-wrap"><table className="tbl" style={{ minWidth: 700 }}>
-          <thead><tr><th className="l">Symbol</th><th className="l">Status</th><th>Entry</th>
-            <th>Stop</th><th>T1/T2</th><th>Size</th><th>Realized R</th><th className="l">Exit</th></tr></thead>
-          <tbody>{(posResp?.rows ?? []).map((p, i) => (
-            <tr key={i} onClick={() => setSel(p.symbol)}>
-              <td className="l"><span className="sym">{p.symbol}</span></td>
-              <td className="l"><span className={`badge ${p.status === 'open' ? 'buy' : 'neutral'}`}>{p.status}</span></td>
-              <td>{fmtPrice(p.entry_fill)}</td><td className="dim">{fmtPrice(p.stop)}</td>
-              <td className="dim">{fmtPrice(p.target1)}/{fmtPrice(p.target2)}</td>
-              <td>{fmtPrice(p.size_usd)}</td>
-              <td className={p.realized_r >= 0 ? 'pos' : 'neg'}>{p.realized_r?.toFixed(2)}R</td>
-              <td className="l dim" style={{ fontSize: 11 }}>{p.exit_reason || '—'}</td>
-            </tr>))}
-            {!(posResp?.rows ?? []).length && <tr><td colSpan={8} className="l dim">No positions yet.</td></tr>}
-          </tbody>
-        </table></div>
-      )}
-      {tab === 'overview' && (
-        <p className="disclaimer" style={{ marginTop: 8, borderTop: 'none' }}>
-          This model runs continuously with its own settings and ledger. It shares only market data and the
-          conservative execution simulator with other models — never scores or balances. Adjust its parameters in
-          Settings → Strategy models. Every statistic is labeled by cohort; forward paper evidence decides the competition.
-        </p>
-      )}
-      {sel && <DetailDrawer symbol={sel} onClose={() => setSel(null)} />}
+          {!dedupe && !ownTable ? (
+            <p className={`faint ${s.note}`}>
+              The tracking table stores one row per state per day, so the same stock repeats while this is off.
+            </p>
+          ) : null}
+          <SignalTable rows={sigRows} onSelect={(r) => setSel(r.symbol)} variant="mixed" scope={scope} loaded={sig.loaded} />
+        </section>
+      ) : null}
+
+      {tab === 'trades' ? (
+        <section aria-label="Paper trades">
+          <DataTable<Position> rows={posRows} columns={posCols}
+            rowKey={(p) => `${p.symbol}|${p.opened_at}|${p.closed_at ?? 'open'}`}
+            onRowClick={(p) => setSel(p.symbol)} defaultSort={{ key: 'opened_at', dir: 'desc' }}
+            evidence="PAPER" note={`Paper account · ${scope}`} loaded={pos.loaded} minWidth={720}
+            empty={<EmptyState compact headline={`No paper trades yet for ${scope}`}
+              reason="The paper account opens a trade only when this strategy issues a Buy pick that passes every check." />} />
+        </section>
+      ) : null}
+
+      {tab === 'about' ? (
+        <section aria-label="About" className="panel">
+          <h3>What it looks for</h3>
+          <p className="lead">{m.edge}{m.edge && !/[.!?]$/.test(m.edge) ? '.' : ''}</p>
+          {m.requires?.length ? (
+            <p className={`dim ${s.req}`}>
+              <span>Needs all of these on the same stock, the same day:</span>
+              {m.requires.map((r) => <StatusPill key={r} size="sm" label={humanKey(r)} tone="neutral" raw={r} />)}
+            </p>
+          ) : null}
+          {m.hypothesis ? <p className="dim">Hypothesis: {m.hypothesis}</p> : null}
+          {m.data_notes ? <p className="dim">Data note: {m.data_notes}</p> : null}
+          <Advanced>
+            <p className="dim">
+              Engine <code>{m.engine ?? '—'}</code> · ledger <code>{m.ledger_profile ?? m.id}</code> · id <code>{m.id}</code>
+            </p>
+          </Advanced>
+          <p className="disclaimer">
+            This strategy runs continuously with its own settings and ledger. It shares only market data and the
+            conservative execution simulator with other strategies — never scores or balances. Adjust its parameters in
+            Settings → Strategy models. Every statistic is labelled by cohort; forward paper evidence decides the competition.
+          </p>
+        </section>
+      ) : null}
+
+      {sel ? <DetailDrawer symbol={sel} onClose={() => setSel(null)} /> : null}
     </>
   );
 }

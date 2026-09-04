@@ -468,7 +468,7 @@ def test_day_trading_universe_excludes_core_and_crypto_by_default():
     assert 'symbols = dt_stock if intraday_ok else []' in src
     assert DEFAULT_SETTINGS["day_trade_crypto"] == "off"
     assert DEFAULT_SETTINGS["model_entry_cutoff_et"] == "11:30"
-    assert plat.ATR_STOP_MULT_DEFAULT == 2.0 and plat.ATR_STOP_MULT["exp_rs_reclaim"] is None
+    assert plat.ATR_STOP_MULT_DEFAULT == 3.0 and plat.ATR_STOP_MULT["exp_rs_reclaim"] is None  # 3.0 set by the Sep-3 engine sweep
 
 
 def test_custom_confluence_strategies_are_registered_and_dispatched():
@@ -521,3 +521,43 @@ def test_eightk_reactor_wiring_and_exit_rules():
     assert "eod_time_exit" not in branch                         # never the 15:55 flatten
     for k in ("sec_live_feed", "eightk_window_start_et", "eightk_stop_pct", "eightk_trail_pct", "eightk_skip_items"):
         assert k in DEFAULT_SETTINGS
+
+def test_eightk_reject_counters_survive_a_restart():
+    """The reactor took no trades in its first window and every gate counter
+    lived only in memory, so a container restart erased the evidence.  The
+    persisted detail must carry each gate's count."""
+    import inspect
+    from app import scheduler as sch
+    src = inspect.getsource(sch.Scheduler._persist_heartbeats)
+    for k in ("window_rejects", "cap_rejects", "item_rejects",
+              "quote_rejects", "spread_rejects"):
+        assert k in src, k
+    react = inspect.getsource(sch.Scheduler._eightk_react)
+    for k in ("window_rejects", "cap_rejects", "item_rejects",
+              "quote_rejects", "spread_rejects"):
+        assert f'hb["{k}"]' in react, k
+
+
+def test_every_completed_tick_marks_the_cycle_ok():
+    """last_cycle_ok was set only inside the premarket discovery path, so the
+    dashboard showed "Scanner starting" for hours after a healthy start."""
+    import inspect, re
+    from app import scheduler as sch
+    src = inspect.getsource(sch.Scheduler._loop)
+    tail = src[src.index('self.state["cycles"] += 1'):]
+    assert re.search(r'self\.state\["last_cycle_ok"\] = True', tail)
+    assert tail.index('last_cycle_ok') < tail.index('except asyncio.CancelledError')
+
+
+def test_promotion_sample_counts_settled_trades_on_the_running_version():
+    """The nightly job counted every actionable signal ever and then said
+    "606/100 below the minimum" — a sentence that contradicts itself."""
+    import inspect
+    from app import scheduler as sch
+    src = inspect.getsource(sch.Scheduler)
+    i = src.index('paper_n = len(')
+    block = src[i - 700:i + 1400]
+    assert 'BuySignal.outcome_v2 != ""' in block      # settled only
+    assert 'BuySignal.strategy_version == cur_ver' in block
+    assert 'sample_met' in block
+    assert '{paper_n}/100 below' not in src           # the contradictory wording is gone
