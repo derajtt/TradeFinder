@@ -588,3 +588,15 @@ def test_provider_urls_with_api_keys_are_never_logged():
     assert 'logging.getLogger("httpx").setLevel(logging.WARNING)' in src
     from app.util.http import SECRET_RE
     assert SECRET_RE.sub(r"\1***", "https://x/y?apikey=abc123&z=1") == "https://x/y?apikey=***&z=1"
+
+
+def test_gate_counters_are_exposed_on_the_health_row():
+    """The 8-K Reactor's window/quote/spread counters were persisted but never
+    surfaced, so its first live window could only be diagnosed with SQL."""
+    import inspect
+    from app.routes import risk_api
+    src = inspect.getsource(risk_api.strategy_health)
+    assert '"gates":' in src
+    for k in ("window_rejects", "quote_rejects", "spread_rejects", "cap_rejects"):
+        assert k in src, k
+    assert "**(p.detail or {})" in src        # the persisted fallback carries them

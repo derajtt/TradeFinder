@@ -57,6 +57,16 @@ const RUN_STATUS: Record<string, Label> = {
   running: { label: 'Running', tone: 'early' }, skipped: { label: 'Skipped', tone: 'neutral' },
 };
 
+/** Plain words for the reject counters a strategy reports. */
+const GATE_WORDS: Record<string, string> = {
+  window_rejects: 'outside its window',
+  cap_rejects: 'at the position cap',
+  item_rejects: 'filing type skipped',
+  quote_rejects: 'no usable quote or under the price floor',
+  spread_rejects: 'spread too wide',
+  rejected_this_pass: 'rejected this pass',
+};
+
 export default function HealthPage() {
   const { data: h, loaded: hLoaded } = usePollingState<HealthDetail>('/api/health/detail', 20000);
   const { data: s, loaded: sLoaded } = usePollingState<StrategyHealth>('/api/health/strategies', 15000);
@@ -125,7 +135,21 @@ export default function HealthPage() {
       cell: (r) => <span className={r.errors ? 'neg' : undefined}>{fmtNum(r.errors, 0)}</span> },
     { key: 'risk_model', header: 'Risk model', align: 'l', cell: (r) => humanKey(r.risk_model) },
     { key: 'skip_reason', header: 'Why idle', align: 'l', simple: true,
-      cell: (r) => <span className="dim">{r.skip_reason || '—'}</span> },
+      cell: (r) => {
+        // Gate counters say what a strategy refused and why, so "scanned 45,
+        // no signals" can be read without opening the database.
+        const g = (r as { gates?: Record<string, number> }).gates;
+        const parts = g ? Object.entries(g).filter(([, v]) => v > 0).map(
+          ([k, v]) => `${v} ${GATE_WORDS[k] ?? k.replace(/_/g, ' ')}`) : [];
+        return (
+          <span className="dim">
+            {r.skip_reason || (parts.length ? '' : '—')}
+            {parts.length ? (
+              <span className="faint">{r.skip_reason ? ' · ' : ''}{parts.join(' · ')}</span>
+            ) : null}
+          </span>
+        );
+      } },
   ], [paperMode, allIdle]);
 
   // LIVE and PAPER LIVE both read "Paper trading" in plain English, so merge counts by label.

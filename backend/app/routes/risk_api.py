@@ -356,7 +356,7 @@ async def strategy_health(request: Request,
                   "symbols_scanned": p.symbols_scanned,
                   "symbols_with_data": p.symbols_with_data,
                   "signals_today": p.signals_today, "errors": p.errors_today,
-                  "skip_reason": p.skip_reason}
+                  "skip_reason": p.skip_reason, **(p.detail or {})}
         acc = accounts.get(mid) or accounts.get(LEDGER_ALIAS.get(mid, ""))
         rows.append({
             "id": mid, "name": meta["name"], "engine": meta["engine"],
@@ -374,6 +374,13 @@ async def strategy_health(request: Request,
             "errors": hb.get("errors", 0),
             "skip_reason": hb.get("skip_reason"),
             "universe": hb.get("universe"),
+            # Gate counters, so a strategy that scanned and refused everything
+            # can be read from the dashboard instead of from the database.
+            "gates": {k: hb[k] for k in
+                      ("window_rejects", "cap_rejects", "item_rejects",
+                       "quote_rejects", "spread_rejects", "rejected_this_pass")
+                      if hb.get(k)} or None,
+            "feed": hb.get("feed"),
             "equity": acc.equity if acc else None,
             "trades_closed": acc.trades_closed if acc else 0,
         })
