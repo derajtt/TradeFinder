@@ -101,7 +101,13 @@ export default function Today() {
   const candLoaded = cand.loaded || liveRows !== null;
 
   const sigRows = useMemo(() => mergeLive(sig.data?.rows ?? [], liveSigs), [sig.data, liveSigs]);
-  const buys = useMemo(() => sigRows.filter((r) => r.signal_type === 'buy' && r.status === 'active'), [sigRows]);
+  /* A Buy pick is a row that passed every check, which is what the canonical
+     lifecycle records.  signal_type + status alone also admitted rows with no
+     lifecycle — and those are exactly the rows carrying no stop or targets, so
+     the card rendered a "Buy" with an empty plan. */
+  const buys = useMemo(() => sigRows.filter(
+    (r) => r.signal_type === 'buy' && r.status === 'active'
+      && r.lifecycle === 'ACTIONABLE_BUY'), [sigRows]);
   const allWatches = useMemo(() => sigRows
     .filter((r) => r.signal_type === 'watch' && r.status === 'active')
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1)), [sigRows]);

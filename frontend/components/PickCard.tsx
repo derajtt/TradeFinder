@@ -74,7 +74,9 @@ export default function PickCard({ row, onSelect, marketOpen, minScoreForBuy, qu
       <div className={s.kv}>
         <div>
           <div className={s.k}>Stop</div>
-          <div className={`${s.v} neg`}>{fmtPrice(row.stop)}</div>
+          <div className={`${s.v} neg`}>
+            {row.stop == null ? <span className="faint">plan not available</span> : fmtPrice(row.stop)}
+          </div>
         </div>
         <div>
           <div className={s.k}>Target 1</div>
