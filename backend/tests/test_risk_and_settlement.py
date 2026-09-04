@@ -155,4 +155,9 @@ def test_open_risk_ceiling_is_checked_per_account_before_a_fill():
     assert 'settings.get("portfolio_risk_gating", "advisory")' in src
     assert "_reject_risk(" in src                            # blocks are recorded
     assert "portfolio_risk_warning" in src                   # advisory is visible
+    # The field must exist on the model: writing sig.evidence raised
+    # AttributeError inside the models cycle and stopped the whole fleet.
+    from app.models import BuySignal
+    assert hasattr(BuySignal, "evidence_snapshot")
+    assert "sig.evidence_snapshot" in src and "sig.evidence " not in src
     assert DEFAULT_SETTINGS["portfolio_risk_gating"] == "advisory"

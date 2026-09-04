@@ -526,9 +526,9 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
                                     "ceiling_pct": ceiling,
                                     "account_equity": round(acc.equity, 2)})
                 return None
-            ev = dict(sig.evidence or {})
+            ev = dict(sig.evidence_snapshot or {})
             ev["portfolio_risk_warning"] = note
-            sig.evidence = ev
+            sig.evidence_snapshot = ev
         size_usd = min(acc.cash * 0.5, max(100.0, risk_usd / risk_per_share * fill))
         pos = PaperPosition(signal_id=sig.id, symbol=symbol, profile=model_id,
                             strategy_version=VERSIONS["strategy_version"],
