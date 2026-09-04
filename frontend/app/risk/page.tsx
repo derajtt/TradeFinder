@@ -16,7 +16,13 @@ interface RiskSettingsPayload {
 }
 interface RiskPosition { symbol: string; direction: string; profile: string; open_risk_dollars: number; correlation_group: string | null }
 interface RiskPortfolio {
-  portfolio: { open_positions: number; total_open_risk: number; total_open_risk_pct: number };
+  portfolio: { open_positions: number; total_open_risk: number; total_open_risk_pct: number;
+    equity_basis?: number; accounts?: number };
+  by_account?: { profile: string; open_risk: number; equity: number;
+    open_risk_pct: number | null; positions: number }[];
+  worst_account?: { profile: string; open_risk: number; equity: number;
+    open_risk_pct: number | null; positions: number } | null;
+  headroom_basis?: string;
   positions: RiskPosition[];
   limits: { max_total_open_risk_pct: number; max_correlated_risk_pct: number; max_sector_risk_pct: number;
     daily_loss_limit_pct: number; weekly_loss_limit_pct: number };
@@ -123,6 +129,8 @@ export default function RiskPage() {
   const blocks = pf?.circuit_breaker?.blocks ?? [];
   const warnings = pf?.circuit_breaker?.warnings ?? [];
   const overCeiling = ceiling !== null && openPct > ceiling;
+  const worst = pf?.worst_account ?? null;
+  const worstPct = worst?.open_risk_pct ?? null;
 
   const posCols: Column<RiskPosition>[] = [
     { key: 'symbol', header: 'Stock', align: 'l', simple: true, sortValue: (r) => r.symbol, cell: (r) => <span className="sym">{r.symbol}</span> },
@@ -143,11 +151,21 @@ export default function RiskPage() {
         <StatTile label="Open risk" evidence="PAPER" source={SOURCE} loaded={tilesLoaded}
           n={openN} unit="open paper trades" tone={overCeiling ? 'risk' : undefined}
           nLabel={openN === 0 ? `No open paper trades · nothing at risk` : undefined}
-          value={ceiling !== null ? `${fmtNum(openPct)}% of ${fmtNum(ceiling, 1)}% ceiling` : `${fmtNum(openPct)}%`}
+          value={`${fmtNum(openPct)}% of all paper accounts`}
           sub={ceiling !== null ? (
-            <div className={`meter${overCeiling ? ' over' : ''}`} aria-hidden>
-              <i style={{ width: `${Math.min(100, (openPct / ceiling) * 100)}%` }} />
-            </div>
+            <>
+              <div className={`meter${overCeiling ? ' over' : ''}`} aria-hidden>
+                <i style={{ width: `${Math.min(100, (openPct / ceiling) * 100)}%` }} />
+              </div>
+              <span className="stat-src">
+                {pf?.portfolio?.accounts
+                  ? `${pf.portfolio.accounts} strategy accounts · ${money(pf.portfolio.equity_basis)} combined`
+                  : ''}
+                {worst && worstPct != null
+                  ? ` · busiest: ${humanKey(worst.profile)} at ${fmtNum(worstPct)}% of its own ${fmtNum(ceiling, 1)}% ceiling`
+                  : ''}
+              </span>
+            </>
           ) : undefined} />
         <StatTile label="Open paper trades" evidence="PAPER" source={SOURCE} loaded={tilesLoaded}
           n={openN} unit="open paper trades" value={openN != null ? fmtNum(openN, 0) : null}
@@ -157,8 +175,10 @@ export default function RiskPage() {
           nLabel={openN === 0 && ceiling !== null ? `No open paper trades · the full ${fmtNum(ceiling, 1)}% ceiling is available` : undefined}
           value={pf ? `${fmtNum(pf.headroom_pct)}%` : null}
           sub={pf && pf.headroom_pct < 0
-            ? `Already ${fmtNum(Math.abs(pf.headroom_pct))} points over the ${fmtNum(ceiling ?? 0, 1)}% ceiling — no room for new paper trades`
-            : ceiling !== null ? `of the ${fmtNum(ceiling, 1)}% total open-risk ceiling` : undefined} />
+            ? `${worst ? humanKey(worst.profile) : 'One strategy'} is already ${fmtNum(Math.abs(pf.headroom_pct))} points over its own ${fmtNum(ceiling ?? 0, 1)}% ceiling — no room there`
+            : ceiling !== null
+              ? `left on the strategy closest to its own ${fmtNum(ceiling, 1)}% ceiling${worst ? ` (${humanKey(worst.profile)})` : ''}`
+              : undefined} />
         {/* Not a number, so a status card rather than a StatTile (spec: "Circuit breaker as StatusPill"). */}
         <div className="stat" aria-busy={!tilesLoaded}>
           <EvidenceTag evidence="PAPER" />

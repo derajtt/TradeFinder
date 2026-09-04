@@ -600,17 +600,41 @@ async def risk_portfolio(db: AsyncSession = Depends(get_session)):
                     "open_risk_dollars": round(risk_unit * qty
                                                * (p.remaining_frac or 1), 2),
                     "correlation_group": correlation_group(p.symbol)})
-    equity = float(cfg["account_equity"])
-    pf = portfolio_risk(pos, equity)
     accs = (await db.execute(select(PaperAccount))).scalars().all()
+    # Every strategy runs its own $10k ledger, so summing their risk against one
+    # $10k account read as "26% of a 3% ceiling" when no single account was over.
+    eq_by_profile = {a.model_id: float(a.equity or 0) for a in accs}
+    fleet_equity = sum(eq_by_profile.values()) or float(cfg["account_equity"])
+    pf = portfolio_risk(pos, fleet_equity)
+    pf["equity_basis"] = round(fleet_equity, 2)
+    pf["accounts"] = len(eq_by_profile) or 1
+
+    ceiling = float(cfg["max_total_open_risk_pct"])
+    by_account = []
+    for prof, eq in sorted(eq_by_profile.items()):
+        risk = round(sum(p["open_risk_dollars"] for p in pos if p["profile"] == prof), 2)
+        if not risk:
+            continue
+        by_account.append({"profile": prof, "open_risk": risk, "equity": round(eq, 2),
+                           "open_risk_pct": round(risk / eq * 100, 3) if eq else None,
+                           "positions": sum(1 for p in pos if p["profile"] == prof)})
+    by_account.sort(key=lambda r: r["open_risk_pct"] or 0, reverse=True)
+    worst = by_account[0] if by_account else None
+    # Each ledger is capped separately, so the binding constraint is the account
+    # closest to its own ceiling — not the fleet total.
+    headroom = round(ceiling - (worst["open_risk_pct"] if worst else 0.0), 3)
+
     dd = max((a.max_drawdown_pct or 0) for a in accs) if accs else 0.0
     breaker = circuit_breaker_state(cfg, drawdown_pct=dd)
-    return {"portfolio": pf, "positions": pos, "limits": {
+    return {"portfolio": pf, "positions": pos,
+            "by_account": by_account, "worst_account": worst,
+            "limits": {
                 "max_total_open_risk_pct": cfg["max_total_open_risk_pct"],
                 "max_correlated_risk_pct": cfg["max_correlated_risk_pct"],
                 "max_sector_risk_pct": cfg["max_sector_risk_pct"],
                 "daily_loss_limit_pct": cfg["daily_loss_limit_pct"],
                 "weekly_loss_limit_pct": cfg["weekly_loss_limit_pct"]},
             "circuit_breaker": breaker,
-            "headroom_pct": round(float(cfg["max_total_open_risk_pct"])
-                                  - pf["total_open_risk_pct"], 3)}
+            "headroom_pct": headroom,
+            "headroom_basis": ("worst single strategy account"
+                               if worst else "no open paper trades")}

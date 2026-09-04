@@ -128,3 +128,16 @@ def test_settlement_engines_partition_open_positions():
     assert "MODELS.keys()" in paper_src and ".notin_(" in paper_src
     for pid in ["primary", "accuracy", "aggressive", "penny", "insight_t45"]:
         assert pid not in MODELS, f"{pid} must not be a registry id"
+
+
+def test_portfolio_risk_uses_fleet_equity_and_worst_account():
+    """Open risk from 21 separate $10k ledgers was divided by one $10k account,
+    so the page read "26.12% of a 3.0% ceiling" while no single strategy was
+    anywhere near its own ceiling."""
+    import inspect
+    from app.routes import risk_api
+    src = inspect.getsource(risk_api.risk_portfolio)
+    assert "fleet_equity" in src and "portfolio_risk(pos, fleet_equity)" in src
+    assert "by_account" in src and "worst_account" not in src.split("return")[0].split("by_account")[0]
+    # headroom is measured against the account closest to its own ceiling
+    assert 'headroom = round(ceiling - (worst["open_risk_pct"] if worst else 0.0), 3)' in src

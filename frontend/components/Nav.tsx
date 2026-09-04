@@ -101,8 +101,9 @@ export default function Nav() {
                   className={`nav-link ${isActive(l.href) ? 'active' : ''}`}
                   aria-current={isActive(l.href) ? 'page' : undefined}>
                   <span className="nav-ico" aria-hidden>{l.ico}</span>
-                  <span className="nav-txt" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.label}</span>
+                  <span className="nav-txt" style={{ display: 'flex', alignItems: 'center',
+                    gap: 8, minWidth: 0, flexWrap: 'wrap', rowGap: 2, lineHeight: 1.25 }}>
+                    <span style={{ minWidth: 0 }}>{l.label}</span>
                     {l.pill ? <StatusPill label={l.pill.label} tone={l.pill.tone} size="sm" /> : null}
                   </span>
                 </Link>
