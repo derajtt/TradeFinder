@@ -572,3 +572,15 @@ def test_custom_strategies_say_why_when_no_confluence_is_found():
     src = inspect.getsource(sch.Scheduler._custom_confluence_pass)
     assert '"skip_reason": (None if candidates else' in src
     assert "no stock has a buy from all of" in src
+
+
+def test_provider_urls_with_api_keys_are_never_logged():
+    """httpx logs each request line at INFO and provider URLs carry apikey= in
+    the query string, so the complete FMP key was written to the container log
+    on every call."""
+    import inspect, logging
+    from app import main as m
+    src = inspect.getsource(m)
+    assert 'logging.getLogger("httpx").setLevel(logging.WARNING)' in src
+    from app.util.http import SECRET_RE
+    assert SECRET_RE.sub(r"\1***", "https://x/y?apikey=abc123&z=1") == "https://x/y?apikey=***&z=1"

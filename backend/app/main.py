@@ -21,6 +21,12 @@ from .util.timeutil import next_scan_start, now_et, session_phase
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
+# httpx logs every request line at INFO, and provider URLs carry the API key as
+# a query parameter — so the complete FMP key was being written into the
+# container log on every call.  Provider calls are already recorded, without the
+# key, in provider_requests.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("main")
 
 
