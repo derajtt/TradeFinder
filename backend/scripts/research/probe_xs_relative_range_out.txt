@@ -1,0 +1,360 @@
+========================================================================================================
+PANEL COVERAGE
+========================================================================================================
+  signal rows: 35660   symbols: 214   dates: 955   (2022-02-08 .. 2026-09-03)
+    TRAIN                                                            rows= 19656 syms=  27 dates= 728 breadth med=27
+    TEST-A                                                           rows=  4455 syms=  27 dates= 165 breadth med=27
+    TEST-B                                                           rows= 11549 syms= 191 dates=  62 breadth med=187
+  width context split: widening 17233 (48.3%) / narrowing 18427 (51.7%)
+========================================================================================================
+PRIMARY SPEC   horizon=5d   return=close_t -> close_t+h
+========================================================================================================
+
+--------------------------------------------------------------------------------------------------------
+TRAIN  (2022-01-03..2024-12-31, deep 27-name cross-section)   dates surviving >=20 cross-section: 728   obs: 19656
+--------------------------------------------------------------------------------------------------------
+
+  range-position quintile, RAW forward return (Q1=bottom of own 20d range)   [field=r]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          4368    +0.547    +0.344    9.537    0.2385    +2.29     728
+    B2          3640    +0.190    +0.130    8.496    0.2083    +0.91     728
+    B3          4368    +0.175    +0.155    7.930    0.1941    +0.90     728
+    B4          3640    +0.587    +0.334    7.571    0.1872    +3.14     728
+    B5          3640    +0.519    +0.462    6.732    0.1642    +3.16     728
+    monotone: NO
+
+  range-position quintile, DATE-DEMEANED return (market netted out)   [field=rd]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          4368    +0.147    -0.346    7.840    0.1277    +1.15     728
+    B2          3640    -0.211    -0.254    7.031    0.1100    -1.92     728
+    B3          4368    -0.225    -0.302    6.486    0.0952    -2.37     728
+    B4          3640    +0.186    +0.008    6.324    0.1059    +1.76     728
+    B5          3640    +0.119    -0.136    5.951    0.1154    +1.03     728
+    monotone: NO
+
+  long/short date-level portfolio (cost floor 0.50%):
+  Q5(top of range) - Q1(bottom)                  mean  -0.028%  med  +0.234%  t= -0.14  NW-t= -0.08  dates= 728  hit=52.1%  >floor(0.50%): no
+  Q1(bottom) - Q5(top)  [reverse leg]            mean  +0.028%  med  -0.234%  t=  0.14  NW-t=  0.08  dates= 728  hit=47.9%  >floor(0.50%): no
+    ^ dropping 5 most influential dates          mean  +0.116%  med  +0.257%  t=  0.59  NW-t=  0.36  dates= 723  hit=52.4%  >floor(0.50%): no
+      dropped: 2024-02-05, 2024-02-07, 2024-07-10, 2024-07-09, 2022-07-29
+    ^ non-overlapping (every 5th date)           mean  +0.213%  med  +0.186%  t=  0.50  NW-t=  0.47  dates= 146  hit=51.4%  >floor(0.50%): no
+
+  FOCAL CROSS: quintile x range-width context (widening = 20d range wider than 5d ago)
+    cell                             n     mean%   median%     clSE%     cl-t   dates
+    Q1 x NARROWING                1863    -0.233    -0.519    0.1736    -1.34     616  <<<
+    Q1 x WIDENING                 2505    +0.429    -0.221    0.1802    +2.38     692  <<<
+    Q2 x NARROWING                2080    -0.283    -0.183    0.1451    -1.95     665
+    Q2 x WIDENING                 1560    -0.115    -0.338    0.1768    -0.65     611
+    Q3 x NARROWING                2506    -0.326    -0.270    0.1241    -2.63     689
+    Q3 x WIDENING                 1862    -0.090    -0.342    0.1583    -0.57     649
+    Q4 x NARROWING                1906    +0.063    -0.029    0.1485    +0.43     668
+    Q4 x WIDENING                 1734    +0.322    +0.070    0.1576    +2.04     641
+    Q5 x NARROWING                1713    -0.158    -0.269    0.1625    -0.97     662
+    Q5 x WIDENING                 1927    +0.365    +0.004    0.1545    +2.36     680
+
+  focal long/short (same location, opposite vol context):
+  Q1-NARROWING - Q1-WIDENING                     mean  -0.570%  med  -0.220%  t= -1.73  NW-t= -1.30  dates= 580  hit=47.4%  >floor(0.50%): no
+    ^ dropping 5 most influential dates          mean  -0.366%  med  -0.177%  t= -1.24  NW-t= -0.99  dates= 575  hit=47.7%  >floor(0.50%): no
+  Q5-NARROWING - Q5-WIDENING (contrast)          mean  -0.502%  med  -0.137%  t= -2.06  NW-t= -1.67  dates= 614  hit=47.9%  >floor(0.50%): no
+
+  long-only legs, RAW return (cost floor 0.25%):
+    Q1 x NARROWING             n=  1863 mean  -0.155%  med  +0.071%  clSE 0.3017%  cl-t  -0.51  dates  616  >0.25%: no
+    Q1 x WIDENING              n=  2505 mean  +1.070%  med  +0.499%  clSE 0.2892%  cl-t  +3.70  dates  692  >0.25%: YES
+
+  PRICE TERCILE CHECK (tercile assigned cross-sectionally each date):
+    tier         medPx$         n Q5-Q1 mean%  Q5-Q1 med% Q1nar-Q1wid% t(Q5-Q1)   dates
+    cheap         15.98      6552      +0.602      +0.574      -0.132    +1.43     728
+    mid           91.12      6552      -0.323      +0.189      -0.344    -1.30     728
+    expensive    243.47      6552      +0.324      +0.159      +0.687    +1.79     728
+
+--------------------------------------------------------------------------------------------------------
+TEST-A (2025-01-02..2025-08-29, same deep names, clean OOS)   dates surviving >=20 cross-section: 160   obs: 4320
+--------------------------------------------------------------------------------------------------------
+
+  range-position quintile, RAW forward return (Q1=bottom of own 20d range)   [field=r]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1           960    +0.506    +0.497    7.535    0.3710    +1.36     160
+    B2           800    +0.844    +0.729    7.625    0.4198    +2.01     160
+    B3           960    +0.667    +0.858    7.624    0.4010    +1.66     160
+    B4           800    -0.046    +0.686    6.806    0.3740    -0.12     160
+    B5           800    +0.264    +0.775    6.677    0.3279    +0.81     160
+    monotone: NO
+
+  range-position quintile, DATE-DEMEANED return (market netted out)   [field=rd]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1           960    +0.048    +0.101    6.329    0.1804    +0.27     160
+    B2           800    +0.387    +0.152    6.156    0.2216    +1.74     160
+    B3           960    +0.210    +0.203    6.129    0.1780    +1.18     160
+    B4           800    -0.504    -0.551    5.492    0.1958    -2.57     160
+    B5           800    -0.193    -0.308    5.940    0.2215    -0.87     160
+    monotone: NO
+
+  long/short date-level portfolio (cost floor 0.50%):
+  Q5(top of range) - Q1(bottom)                  mean  -0.242%  med  -0.249%  t= -0.74  NW-t= -0.49  dates= 160  hit=46.9%  >floor(0.50%): no
+  Q1(bottom) - Q5(top)  [reverse leg]            mean  +0.242%  med  +0.249%  t=  0.74  NW-t=  0.49  dates= 160  hit=53.1%  >floor(0.50%): no
+    ^ dropping 5 most influential dates          mean  -0.150%  med  -0.243%  t= -0.50  NW-t= -0.34  dates= 155  hit=47.1%  >floor(0.50%): no
+      dropped: 2025-03-18, 2025-04-28, 2025-03-17, 2025-04-15, 2025-04-09
+    ^ non-overlapping (every 5th date)           mean  +0.123%  med  +0.770%  t=  0.14  NW-t=  0.20  dates=  32  hit=59.4%  >floor(0.50%): no
+
+  FOCAL CROSS: quintile x range-width context (widening = 20d range wider than 5d ago)
+    cell                             n     mean%   median%     clSE%     cl-t   dates
+    Q1 x NARROWING                 436    +0.491    +0.361    0.2454    +2.00     136  <<<
+    Q1 x WIDENING                  524    -0.320    -0.293    0.2804    -1.14     158  <<<
+    Q2 x NARROWING                 466    +0.413    +0.152    0.2898    +1.42     146
+    Q2 x WIDENING                  334    +0.350    +0.088    0.3630    +0.96     136
+    Q3 x NARROWING                 552    +0.274    +0.386    0.2481    +1.11     145
+    Q3 x WIDENING                  408    +0.123    +0.060    0.2859    +0.43     135
+    Q4 x NARROWING                 437    -0.202    -0.321    0.2609    -0.77     146
+    Q4 x WIDENING                  363    -0.867    -1.028    0.2971    -2.92     140
+    Q5 x NARROWING                 418    +0.019    +0.073    0.3376    +0.05     144
+    Q5 x WIDENING                  382    -0.425    -0.567    0.2815    -1.51     143
+
+  focal long/short (same location, opposite vol context):
+  Q1-NARROWING - Q1-WIDENING                     mean  +1.962%  med  +1.323%  t=  3.10  NW-t=  1.85  dates= 134  hit=59.7%  >floor(0.50%): YES
+    ^ dropping 5 most influential dates          mean  +1.191%  med  +1.317%  t=  2.63  NW-t=  1.88  dates= 129  hit=58.9%  >floor(0.50%): YES
+  Q5-NARROWING - Q5-WIDENING (contrast)          mean  +1.011%  med  +0.960%  t=  1.43  NW-t=  1.12  dates= 127  hit=61.4%  >floor(0.50%): YES
+
+  long-only legs, RAW return (cost floor 0.25%):
+    Q1 x NARROWING             n=   436 mean  +0.990%  med  +0.847%  clSE 0.4567%  cl-t  +2.17  dates  136  >0.25%: YES
+    Q1 x WIDENING              n=   524 mean  +0.103%  med  +0.240%  clSE 0.5042%  cl-t  +0.20  dates  158  >0.25%: no
+
+  PRICE TERCILE CHECK (tercile assigned cross-sectionally each date):
+    tier         medPx$         n Q5-Q1 mean%  Q5-Q1 med% Q1nar-Q1wid% t(Q5-Q1)   dates
+    cheap         17.20      1440      +0.188      +0.247      -0.220    +0.27     160
+    mid          112.83      1440      -1.416      -0.785      -1.109    -2.77     160
+    expensive    340.94      1440      +0.696      +1.264      +4.555    +1.32     160
+
+--------------------------------------------------------------------------------------------------------
+TEST-B (2026-05-01..2026-09-03, wide ~189 names, mover-selected)   dates surviving >=20 cross-section: 57   obs: 10597
+--------------------------------------------------------------------------------------------------------
+
+  range-position quintile, RAW forward return (Q1=bottom of own 20d range)   [field=r]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          2137    +3.197    +0.407   26.554    0.9204    +3.47      57
+    B2          2125    +1.299    +0.062   18.040    0.6507    +2.00      57
+    B3          2117    +1.460    +0.659   14.422    0.5224    +2.80      57
+    B4          2125    +0.765    +0.000   14.599    0.3927    +1.95      57
+    B5          2093    -0.043    -0.176   10.289    0.3691    -0.12      57
+    monotone: NO
+
+  range-position quintile, DATE-DEMEANED return (market netted out)   [field=rd]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          2137    +1.851    -0.962   26.013    0.5806    +3.19      57
+    B2          2125    -0.048    -1.149   17.603    0.3814    -0.13      57
+    B3          2117    +0.122    -0.768   14.041    0.2811    +0.43      57
+    B4          2125    -0.582    -0.909   14.546    0.3546    -1.64      57
+    B5          2093    -1.372    -1.425   10.206    0.3244    -4.23      57
+    monotone: NO
+
+  long/short date-level portfolio (cost floor 0.50%):
+  Q5(top of range) - Q1(bottom)                  mean  -3.209%  med  -1.652%  t= -3.83  NW-t= -2.47  dates=  57  hit=31.6%  >floor(0.50%): no
+  Q1(bottom) - Q5(top)  [reverse leg]            mean  +3.209%  med  +1.652%  t=  3.83  NW-t=  2.47  dates=  57  hit=68.4%  >floor(0.50%): YES
+    ^ dropping 5 most influential dates          mean  -2.207%  med  -1.357%  t= -4.04  NW-t= -3.62  dates=  52  hit=32.7%  >floor(0.50%): no
+      dropped: 2026-07-29, 2026-07-28, 2026-06-17, 2026-06-25, 2026-07-27
+    ^ non-overlapping (every 5th date)           mean  -4.699%  med  -1.330%  t= -1.88  NW-t= -3.11  dates=  12  hit=25.0%  >floor(0.50%): no
+
+  FOCAL CROSS: quintile x range-width context (widening = 20d range wider than 5d ago)
+    cell                             n     mean%   median%     clSE%     cl-t   dates
+    Q1 x NARROWING                 720    +2.708    -1.710    1.2244    +2.21      57  <<<
+    Q1 x WIDENING                 1417    +1.415    -0.523    0.5390    +2.63      57  <<<
+    Q2 x NARROWING                1094    +0.287    -0.980    0.4856    +0.59      57
+    Q2 x WIDENING                 1031    -0.404    -1.180    0.5598    -0.72      57
+    Q3 x NARROWING                1282    +0.078    -0.941    0.4599    +0.17      57
+    Q3 x WIDENING                  835    +0.189    -0.543    0.4493    +0.42      57
+    Q4 x NARROWING                1292    -0.465    -1.072    0.4795    -0.97      57
+    Q4 x WIDENING                  833    -0.763    -0.547    0.5583    -1.37      57
+    Q5 x NARROWING                1051    -1.745    -1.289    0.4310    -4.05      57
+    Q5 x WIDENING                 1042    -0.997    -1.547    0.3657    -2.73      57
+
+  focal long/short (same location, opposite vol context):
+  Q1-NARROWING - Q1-WIDENING                     mean  +1.946%  med  -0.507%  t=  1.39  NW-t=  0.88  dates=  57  hit=49.1%  >floor(0.50%): YES
+    ^ dropping 5 most influential dates          mean  +0.096%  med  -1.030%  t=  0.11  NW-t=  0.11  dates=  52  hit=46.2%  >floor(0.50%): no
+  Q5-NARROWING - Q5-WIDENING (contrast)          mean  -0.542%  med  -0.670%  t= -1.01  NW-t= -1.23  dates=  57  hit=45.6%  >floor(0.50%): no
+
+  long-only legs, RAW return (cost floor 0.25%):
+    Q1 x NARROWING             n=   720 mean  +3.880%  med  -0.338%  clSE 1.5284%  cl-t  +2.54  dates   57  >0.25%: YES
+    Q1 x WIDENING              n=  1417 mean  +2.850%  med  +0.820%  clSE 0.8322%  cl-t  +3.42  dates   57  >0.25%: YES
+
+  PRICE TERCILE CHECK (tercile assigned cross-sectionally each date):
+    tier         medPx$         n Q5-Q1 mean%  Q5-Q1 med% Q1nar-Q1wid% t(Q5-Q1)   dates
+    cheap          2.06      3551      -5.005      -2.166      +4.126    -3.28      57
+    mid            5.72      3534      -0.587      -1.091      +0.022    -0.87      57
+    expensive     27.55      3512      -1.761      -1.730      -0.901    -1.73      57
+
+  DECILE view (dates with >=50 names only)   [field=rd]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          1083    +2.529    -0.821   28.180    0.8945    +2.83      57
+    B2          1054    +1.153    -1.085   23.572    0.6437    +1.79      57
+    B3          1072    +0.749    -1.187   20.733    0.5506    +1.36      57
+    B4          1053    -0.860    -1.112   13.663    0.4782    -1.80      57
+    B5          1058    -0.270    -1.057   14.092    0.4295    -0.63      57
+    B6          1059    +0.513    -0.495   13.985    0.3748    +1.37      57
+    B7          1066    -0.496    -0.961   13.831    0.4016    -1.23      57
+    B8          1059    -0.669    -0.843   15.239    0.5979    -1.12      57
+    B9          1067    -1.127    -1.290   10.294    0.3441    -3.27      57
+    B10         1026    -1.628    -1.489   10.111    0.4370    -3.72      57
+    monotone: NO
+
+--------------------------------------------------------------------------------------------------------
+TEST-ALL (both test segments pooled)   dates surviving >=20 cross-section: 217   obs: 14917
+--------------------------------------------------------------------------------------------------------
+
+  range-position quintile, RAW forward return (Q1=bottom of own 20d range)   [field=r]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          3097    +2.363    +0.453   22.485    0.6478    +3.65     217
+    B2          2925    +1.175    +0.373   15.885    0.4837    +2.43     217
+    B3          3077    +1.213    +0.714   12.702    0.3794    +3.20     217
+    B4          2925    +0.543    +0.266   12.947    0.3024    +1.80     217
+    B5          2893    +0.042    +0.000    9.429    0.2805    +0.15     217
+    monotone: NO
+
+  range-position quintile, DATE-DEMEANED return (market netted out)   [field=rd]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          3097    +1.292    -0.492   21.908    0.4064    +3.18     217
+    B2          2925    +0.071    -0.555   15.345    0.2822    +0.25     217
+    B3          3077    +0.149    -0.251   12.138    0.2000    +0.75     217
+    B4          2925    -0.561    -0.752   12.726    0.2615    -2.14     217
+    B5          2893    -1.046    -0.923    9.240    0.2438    -4.29     217
+    monotone: NO
+
+  long/short date-level portfolio (cost floor 0.50%):
+  Q5(top of range) - Q1(bottom)                  mean  -1.021%  med  -0.569%  t= -3.04  NW-t= -1.88  dates= 217  hit=42.9%  >floor(0.50%): no
+  Q1(bottom) - Q5(top)  [reverse leg]            mean  +1.021%  med  +0.569%  t=  3.04  NW-t=  1.88  dates= 217  hit=57.1%  >floor(0.50%): YES
+    ^ dropping 5 most influential dates          mean  -0.603%  med  -0.373%  t= -2.14  NW-t= -1.46  dates= 212  hit=43.9%  >floor(0.50%): no
+      dropped: 2026-07-29, 2026-07-28, 2026-06-25, 2025-03-18, 2026-07-27
+    ^ non-overlapping (every 5th date)           mean  -1.192%  med  +0.001%  t= -1.22  NW-t= -1.20  dates=  44  hit=50.0%  >floor(0.50%): no
+
+  FOCAL CROSS: quintile x range-width context (widening = 20d range wider than 5d ago)
+    cell                             n     mean%   median%     clSE%     cl-t   dates
+    Q1 x NARROWING                1156    +1.872    -0.616    0.7642    +2.45     193  <<<
+    Q1 x WIDENING                 1941    +0.947    -0.462    0.4030    +2.35     215  <<<
+    Q2 x NARROWING                1560    +0.325    -0.426    0.3491    +0.93     203
+    Q2 x WIDENING                 1365    -0.220    -0.704    0.4303    -0.51     193
+    Q3 x NARROWING                1834    +0.137    -0.260    0.3281    +0.42     202
+    Q3 x WIDENING                 1243    +0.167    -0.241    0.3143    +0.53     192
+    Q4 x NARROWING                1729    -0.399    -0.752    0.3625    -1.10     203
+    Q4 x WIDENING                 1196    -0.795    -0.752    0.3969    -2.00     197
+    Q5 x NARROWING                1469    -1.243    -0.836    0.3266    -3.81     201
+    Q5 x WIDENING                 1424    -0.843    -1.112    0.2769    -3.05     200
+
+  focal long/short (same location, opposite vol context):
+  Q1-NARROWING - Q1-WIDENING                     mean  +1.957%  med  +0.842%  t=  3.22  NW-t=  1.97  dates= 191  hit=56.5%  >floor(0.50%): YES
+    ^ dropping 5 most influential dates          mean  +1.070%  med  +0.770%  t=  2.30  NW-t=  1.68  dates= 186  hit=55.4%  >floor(0.50%): YES
+  Q5-NARROWING - Q5-WIDENING (contrast)          mean  +0.530%  med  +0.539%  t=  1.02  NW-t=  0.82  dates= 184  hit=56.5%  >floor(0.50%): YES
+
+  long-only legs, RAW return (cost floor 0.25%):
+    Q1 x NARROWING             n=  1156 mean  +2.790%  med  +0.178%  clSE 0.9624%  cl-t  +2.90  dates  193  >0.25%: YES
+    Q1 x WIDENING              n=  1941 mean  +2.108%  med  +0.640%  clSE 0.6270%  cl-t  +3.36  dates  215  >0.25%: YES
+
+  PRICE TERCILE CHECK (tercile assigned cross-sectionally each date):
+    tier         medPx$         n Q5-Q1 mean%  Q5-Q1 med% Q1nar-Q1wid% t(Q5-Q1)   dates
+    cheap          2.64      4991      -1.176      -0.821      +1.916    -1.78     217
+    mid            6.59      4974      -1.198      -0.802      -0.533    -2.88     217
+    expensive     46.23      4952      +0.050      +0.521      +2.251    +0.11     217
+
+  DECILE view (dates with >=50 names only)   [field=rd]
+    bucket         n     mean%   median%      sd%     clSE%     cl-t   dates
+    B1          1083    +2.529    -0.821   28.180    0.8945    +2.83      57
+    B2          1054    +1.153    -1.085   23.572    0.6437    +1.79      57
+    B3          1072    +0.749    -1.187   20.733    0.5506    +1.36      57
+    B4          1053    -0.860    -1.112   13.663    0.4782    -1.80      57
+    B5          1058    -0.270    -1.057   14.092    0.4295    -0.63      57
+    B6          1059    +0.513    -0.495   13.985    0.3748    +1.37      57
+    B7          1066    -0.496    -0.961   13.831    0.4016    -1.23      57
+    B8          1059    -0.669    -0.843   15.239    0.5979    -1.12      57
+    B9          1067    -1.127    -1.290   10.294    0.3441    -3.27      57
+    B10         1026    -1.628    -1.489   10.111    0.4370    -3.72      57
+    monotone: NO
+========================================================================================================
+ROBUSTNESS — primary spec (h=5d, Q5-Q1 date-level spread, demeaning irrelevant to a spread)
+========================================================================================================
+  variant / era                                             mean%    median%        t     NW-t   dates
+  h=1d close->close  | TRAIN                               +0.092     +0.170    +0.99    +1.01     728
+  h=1d close->close  | TEST-A                              -0.063     -0.133    -0.40    -0.42     164
+  h=1d close->close  | TEST-B                              -1.014     -0.255    -2.16    -2.03      61
+  h=5d close->close  | TRAIN                               -0.028     +0.234    -0.14    -0.08     728
+  h=5d close->close  | TEST-A                              -0.242     -0.249    -0.74    -0.49     160
+  h=5d close->close  | TEST-B                              -3.209     -1.652    -3.83    -2.47      57
+  h=10d close->close  | TRAIN                              -0.089     +0.296    -0.31    -0.14     728
+  h=10d close->close  | TEST-A                             -0.862     -0.742    -2.11    -1.11     155
+  h=10d close->close  | TEST-B                             -4.330     -3.064    -5.13    -3.15      52
+
+  h=5d open(t+1)->close (tradeable) | TRAIN                -0.057     +0.087    -0.28    -0.17     728
+  h=5d open(t+1)->close (tradeable) | TEST-A               -0.261     -0.288    -0.84    -0.55     160
+  h=5d open(t+1)->close (tradeable) | TEST-B               -2.336     -1.147    -2.95    -2.11      57
+
+  h=5d winsorized +/-25% | TRAIN                           +0.095     +0.190    +0.52    +0.31     728
+  h=5d winsorized +/-25% | TEST-A                          -0.268     -0.231    -0.85    -0.56     160
+  h=5d winsorized +/-25% | TEST-B                          -1.204     -0.408    -2.32    -1.69      57
+
+  h=5d split-guarded panel | TRAIN                         -0.028     +0.234    -0.14    -0.08     728
+  h=5d split-guarded panel | TEST-A                        -0.242     -0.249    -0.74    -0.49     160
+  h=5d split-guarded panel | TEST-B                        -1.508     -0.809    -2.41    -1.76      57
+    (split guard removed 243 of 35660 signal rows)
+
+  h=5d price>=$5 only | TRAIN                              +0.095     +0.250    +0.48    +0.28     728
+  h=5d price>=$5 only | TEST-A                             -0.475     -0.090    -1.56    -1.02     160
+  h=5d price>=$5 only | TEST-B                             -1.683     -1.417    -2.11    -1.45      57
+  h=5d ex-ETF only | TRAIN                                 -0.181     -0.066    -0.80    -0.48     728
+  h=5d ex-ETF only | TEST-A                                -0.082     -0.115    -0.22    -0.14     160
+  h=5d ex-ETF only | TEST-B                                -3.264     -1.580    -3.86    -2.49      57
+
+  h=5d FOCAL Q1nar-Q1wid | TRAIN                           -0.570     -0.220    -1.73    -1.30     580
+  h=5d FOCAL Q1nar-Q1wid | TEST-A                          +1.962     +1.323    +3.10    +1.85     134
+  h=5d FOCAL Q1nar-Q1wid | TEST-B                          +1.946     -0.507    +1.39    +0.88      57
+
+  h=5d FOCAL, XS-median widening def | TRAIN               -0.350     -0.264    -1.20    -0.91     658
+  h=5d FOCAL, XS-median widening def | TEST-A              +0.784     +0.461    +1.63    +1.11     147
+  h=5d FOCAL, XS-median widening def | TEST-B              +2.322     -0.698    +1.47    +0.90      57
+========================================================================================================
+FORENSICS
+========================================================================================================
+
+  [F0] distinct dates used at h=5d after the >=20 cross-section filter: 945
+        TRAIN        728
+        TEST-A       160
+        TEST-B       57
+
+  [F1] naive-iid t vs date-clustered t, range-position quintiles (h=5d)
+    era            bucket field            n     mean%   naive-t   clust-t  inflate
+    TRAIN          Q1     RAW           4368    +0.547     +3.79     +2.29     1.65x
+    TRAIN          Q5     RAW           3640    +0.519     +4.66     +3.16     1.47x
+    TRAIN          Q1     demeaned      4368    +0.147     +1.24     +1.15     1.08x
+    TRAIN          Q5     demeaned      3640    +0.119     +1.21     +1.03     1.17x
+    TEST-A         Q1     RAW            960    +0.506     +2.08     +1.36     1.53x
+    TEST-A         Q5     RAW            800    +0.264     +1.12     +0.81     1.39x
+    TEST-A         Q1     demeaned       960    +0.048     +0.24     +0.27     0.88x
+    TEST-A         Q5     demeaned       800    -0.193     -0.92     -0.87     1.05x
+    TEST-B         Q1     RAW           2137    +3.197     +5.57     +3.47     1.60x
+    TEST-B         Q5     RAW           2093    -0.043     -0.19     -0.12     1.64x
+    TEST-B         Q1     demeaned      2137    +1.851     +3.29     +3.19     1.03x
+    TEST-B         Q5     demeaned      2093    -1.372     -6.15     -4.23     1.45x
+
+  [F2] TEST-A focal reconciliation (pooled cell means vs equal-weighted date spread)
+      pooled  Q1-narrowing mean  +0.491% (n=436, 136 dates)
+      pooled  Q1-widening  mean  -0.320% (n=524, 158 dates)
+      pooled difference                 +0.811%
+      pooled diff on the 134 dates where BOTH cells exist   +1.086%
+      equal-weighted date-level spread (what was reported)   +1.962%  over 134 dates
+      names per date in each leg: narrowing 3.2, widening 2.8  <- portfolio thinness
+
+  [F3] TEST-A focal Q1nar-Q1wid, concentration in time
+      top  1 dates by |spread| contribute   13.0% of the total sum
+      top  3 dates by |spread| contribute   37.3% of the total sum
+      top  5 dates by |spread| contribute   53.5% of the total sum
+      top 10 dates by |spread| contribute   58.5% of the total sum
+      by month: 2025-01 +0.42%(n=19)  2025-02 +1.93%(n=15)  2025-03 -0.09%(n=12)  2025-04 -1.06%(n=11)  2025-05 +7.00%(n=21)  2025-06 -1.15%(n=20)  2025-07 +4.66%(n=22)  2025-08 +0.87%(n=14)
+      TEST-A focal EXCLUDING Mar+Apr 2025            mean  +2.483%  med  +1.467%  t=  3.54  NW-t=  2.00  dates= 111  hit=62.2%  >floor(0.50%): YES
+
+  [F4] TEST-B headline Q5-Q1: cheap-name / skew decomposition
+      all names      Q5-Q1                           mean  -3.209%  med  -1.652%  t= -3.83  NW-t= -2.47  dates=  57  hit=31.6%  >floor(0.50%): no
+      price >= $5    Q5-Q1                           mean  -1.683%  med  -1.417%  t= -2.11  NW-t= -1.45  dates=  57  hit=36.8%  >floor(0.50%): no
+      price >= $10   Q5-Q1                           mean  -1.678%  med  -1.819%  t= -1.76  NW-t= -1.31  dates=  57  hit=31.6%  >floor(0.50%): no
+      price >= $20   Q5-Q1                           mean  -2.439%  med  -2.679%  t= -2.26  NW-t= -1.83  dates=  57  hit=31.6%  >floor(0.50%): no
+
+  [F5] focal Q1nar-Q1wid sign stability (the decision a trader would face)
+      TRAIN        mean  -0.570%  median  -0.220%  clustered-t  -1.73  NW-t  -1.30  dates  580
+      TEST-A       mean  +1.962%  median  +1.323%  clustered-t  +3.10  NW-t  +1.85  dates  134
+      TEST-B       mean  +1.946%  median  -0.507%  clustered-t  +1.39  NW-t  +0.88  dates   57
+========================================================================================================
+done.

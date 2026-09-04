@@ -1,0 +1,709 @@
+VOLUME SHAPE PROBE -- does participation TIMING predict returns?
+cost hurdle for tradeability: 0.25% per trade
+buckets: causal trailing z (prior 60 sessions, min 30) vs fixed edges [-1.0, -0.33, 0.33, 1.0]
+NOTE multiple testing: 4 shape vars x 2 outcomes = 8 primary tests per split;
+     a 2-SE bar is therefore generous. f_mid = 1 - f_first - f_last (not independent).
+
+5-min panel build: 2468 symbol-days kept; skipped {'not_full_78_bars': 34}
+  POWER (5-min panel): next-day O->C sd=2.89%; a 5-bucket split gives n~486/bucket,
+    pooled se~0.131% so a true 0.25% bucket effect would land at t~1.9;
+    at the DATE level (408 dates, sd of daily mean=1.90%) se~0.094%, t~2.7.
+============================================================================================================
+PANEL 5-MINUTE (exact 09:30-10:30 / 15:00-16:00 / 14:00 cut)   symbols=6  symbol-days=2468  dates=413  (2024-01-02 .. 2025-08-29)
+  TRAIN rows=1494 dates=249   TEST rows=974 dates=164
+============================================================================================================
+  corr(f_first, day ret) = -0.015   corr(f_first, |day ret|) = +0.094   mean=0.2768 sd=0.0692
+  corr(f_last, day ret) = -0.021   corr(f_last, |day ret|) = -0.244   mean=0.1893 sd=0.0695
+  corr(tilt, day ret) = -0.004   corr(tilt, |day ret|) = -0.186   mean=-0.0876 sd=0.1260
+
+############################################################################################################
+### TRAIN  (5-MINUTE (exact 09:30-10:30 / 15:00-16:00 / 14:00 cut))   signal dates < 2025-01-01
+############################################################################################################
+
+--- (a) NEXT-DAY open-to-close return %, by TODAY's full-day volume shape ---
+
+[TRAIN] next-day O->C ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       200   0.0803   0.0032    3.172   0.2243    106   0.0113   0.1622    0.36
+B2 -1..-.33      273  -0.1458  -0.0633    2.831   0.1713    153  -0.2071  -0.2320   -0.85
+B3 -.33..33      338  -0.2252  -0.0513    2.782   0.1513    177  -0.1447  -0.2751   -1.49
+B4 .33..1        265  -0.1008  -0.0065    3.108   0.1909    150  -0.1446  -0.2033   -0.53
+B5 z>1.0         220   0.0795   0.1044    2.616   0.1763    123   0.0879   0.0155    0.45
+B5-B1                 -0.0008                     0.2853                            -0.00
+  date-level B5-B1 spread: n_dates=44 mean=-0.4192% median=+0.5592% sd=3.791 se=0.5715 t=-0.73  (55% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 +0.245(n=81)  B2 -0.081(n=134)  B3 -0.207(n=187)  B4 +0.022(n=130)  B5 -0.078(n=111)
+  [cond-window DOWN] B1 -0.031(n=119)  B2 -0.209(n=139)  B3 -0.247(n=151)  B4 -0.219(n=135)  B5 +0.240(n=109)
+  OLS next_oc ~ z_f_first + ret_day + |ret_day| + symbol FE   (n=1296, 216 dates, date-clustered SE)
+     beta(z_f_first) = +0.0312% per 1 sd of shape   se=0.0818   t=0.38
+     beta(ret_day)=+0.0217  beta(|ret_day|)=+0.0600
+
+[TRAIN] next-day O->C ~ z_f_mid
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       230  -0.3561  -0.1511    2.641   0.1741    137  -0.2873  -0.2861   -2.05
+B2 -1..-.33      292   0.0519   0.0032    3.079   0.1802    166   0.0581  -0.0400    0.29
+B3 -.33..33      342  -0.1703   0.0052    2.557   0.1383    171  -0.1811  -0.2172   -1.23
+B4 .33..1        255   0.0070   0.0454    3.204   0.2006    148  -0.0101  -0.0681    0.03
+B5 z>1.0         177   0.0801   0.0850    3.048   0.2291    111  -0.0016   0.1558    0.35
+B5-B1                  0.4362                     0.2878                             1.52
+  date-level B5-B1 spread: n_dates=56 mean=+0.5840% median=+0.2937% sd=3.287 se=0.4393 t=1.33  (57% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.422(n=110)  B2 +0.147(n=137)  B3 -0.161(n=185)  B4 +0.028(n=124)  B5 +0.195(n=87)
+  [cond-window DOWN] B1 -0.296(n=120)  B2 -0.032(n=155)  B3 -0.181(n=157)  B4 -0.013(n=131)  B5 -0.031(n=90)
+  OLS next_oc ~ z_f_mid + ret_day + |ret_day| + symbol FE   (n=1296, 216 dates, date-clustered SE)
+     beta(z_f_mid) = +0.1108% per 1 sd of shape   se=0.0796   t=1.39
+     beta(ret_day)=+0.0209  beta(|ret_day|)=+0.0500
+
+[TRAIN] next-day O->C ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       170  -0.1857   0.0138    2.661   0.2041    102  -0.1503  -0.0888   -0.91
+B2 -1..-.33      353   0.0938   0.0760    2.993   0.1593    176   0.0865   0.1431    0.59
+B3 -.33..33      327   0.0550   0.0404    3.253   0.1799    171  -0.0749  -0.0113    0.31
+B4 .33..1        232  -0.1287  -0.0054    2.539   0.1667    150  -0.0072  -0.0388   -0.77
+B5 z>1.0         214  -0.4614  -0.3325    2.672   0.1827    120  -0.4361  -0.3873   -2.53
+B5-B1                 -0.2757                     0.2739                            -1.01
+  date-level B5-B1 spread: n_dates=38 mean=-0.2215% median=-0.2160% sd=3.092 se=0.5016 t=-0.44  (45% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.140(n=82)  B2 +0.126(n=184)  B3 -0.065(n=165)  B4 -0.053(n=126)  B5 -0.347(n=86)
+  [cond-window DOWN] B1 -0.229(n=88)  B2 +0.059(n=169)  B3 +0.178(n=162)  B4 -0.218(n=106)  B5 -0.538(n=128)
+  OLS next_oc ~ z_f_last + ret_day + |ret_day| + symbol FE   (n=1296, 216 dates, date-clustered SE)
+     beta(z_f_last) = -0.1218% per 1 sd of shape   se=0.0789   t=-1.54
+     beta(ret_day)=+0.0189  beta(|ret_day|)=+0.0685
+
+[TRAIN] next-day O->C ~ z_tilt
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       203   0.1120   0.0839    2.370   0.1663    118   0.0846   0.0370    0.67
+B2 -1..-.33      300  -0.1900   0.0099    3.277   0.1892    152  -0.1732  -0.3132   -1.00
+B3 -.33..33      333  -0.1431   0.0000    2.937   0.1609    181  -0.1339  -0.0850   -0.89
+B4 .33..1        252  -0.0164  -0.0636    2.765   0.1742    149  -0.0708  -0.1062   -0.09
+B5 z>1.0         208  -0.1106  -0.0793    2.880   0.1997    110  -0.1642  -0.0341   -0.55
+B5-B1                 -0.2226                     0.2599                            -0.86
+  date-level B5-B1 spread: n_dates=46 mean=+0.0072% median=-0.4396% sd=3.190 se=0.4703 t=0.02  (41% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 +0.024(n=103)  B2 -0.266(n=150)  B3 -0.064(n=176)  B4 +0.180(n=131)  B5 -0.125(n=83)
+  [cond-window DOWN] B1 +0.203(n=100)  B2 -0.114(n=150)  B3 -0.231(n=157)  B4 -0.229(n=121)  B5 -0.101(n=125)
+  OLS next_oc ~ z_tilt + ret_day + |ret_day| + symbol FE   (n=1296, 216 dates, date-clustered SE)
+     beta(z_tilt) = -0.0908% per 1 sd of shape   se=0.0827   t=-1.10
+     beta(ret_day)=+0.0205  beta(|ret_day|)=+0.0678
+
+--- (a2) NEXT-DAY |open-to-close| return % (magnitude, not direction) ---
+
+[TRAIN] next-day |O->C| ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       200   1.8866   0.8524    2.547   0.1801    106   1.5038   1.8249   10.47
+B2 -1..-.33      273   1.7282   0.9921    2.244   0.1358    153   1.4197   1.6594   12.72
+B3 -.33..33      338   1.6317   0.7511    2.263   0.1231    177   1.3036   1.5886   13.25
+B4 .33..1        265   1.9230   1.0000    2.441   0.1500    150   1.6304   1.8359   12.82
+B5 z>1.0         220   1.6345   0.8496    2.041   0.1376    123   1.3438   1.5920   11.88
+B5-B1                 -0.2521                     0.2267                            -1.11
+  date-level B5-B1 spread: n_dates=44 mean=-0.0873% median=-0.1758% sd=3.417 se=0.5151 t=-0.17  (45% of dates positive)
+  monotone across buckets: NO
+
+[TRAIN] next-day |O->C| ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       170   1.6183   0.8980    2.117   0.1623    102   1.3022   1.5471    9.97
+B2 -1..-.33      353   1.8717   1.0253    2.335   0.1243    176   1.5612   1.8336   15.06
+B3 -.33..33      327   1.8486   0.8180    2.675   0.1479    171   1.4756   1.7877   12.49
+B4 .33..1        232   1.5486   0.7775    2.013   0.1322    150   1.2735   1.4773   11.72
+B5 z>1.0         214   1.7301   1.0192    2.085   0.1425    120   1.4525   1.6756   12.14
+B5-B1                  0.1118                     0.2160                             0.52
+  date-level B5-B1 spread: n_dates=38 mean=+0.1908% median=+0.2595% sd=2.702 se=0.4384 t=0.44  (58% of dates positive)
+  monotone across buckets: NO
+
+--- (b) SAME-DAY 14:00-to-close return %, by shape measured only up to 14:00 ---
+
+[TRAIN] 14:00->close ~ z_f14_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       198  -0.1055  -0.0437    1.127   0.0801    126  -0.1120  -0.1437   -1.32
+B2 -1..-.33      248  -0.1168   0.0068    1.118   0.0710    148  -0.0687  -0.0770   -1.64
+B3 -.33..33      362  -0.1442  -0.0081    1.217   0.0640    179  -0.0568  -0.0902   -2.25
+B4 .33..1        290  -0.0438   0.0000    1.011   0.0594    161  -0.0485  -0.0255   -0.74
+B5 z>1.0         216  -0.2406  -0.0167    1.046   0.0712    127  -0.1661  -0.2085   -3.38
+B5-B1                 -0.1351                     0.1071                            -1.26
+  date-level B5-B1 spread: n_dates=60 mean=-0.0786% median=-0.0927% sd=1.441 se=0.1861 t=-0.42  (47% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.096(n=92)  B2 -0.207(n=128)  B3 -0.174(n=200)  B4 -0.139(n=145)  B5 -0.139(n=103)
+  [cond-window DOWN] B1 -0.114(n=106)  B2 -0.020(n=120)  B3 -0.107(n=162)  B4 +0.051(n=145)  B5 -0.333(n=113)
+  OLS ret_1400_close ~ z_f14_first + ret_open_1400 + |ret_open_1400| + symbol FE   (n=1314, 219 dates, date-clustered SE)
+     beta(z_f14_first) = -0.0127% per 1 sd of shape   se=0.0336   t=-0.38
+     beta(ret_open_1400)=+0.0099  beta(|ret_open_1400|)=+0.0215
+
+[TRAIN] 14:00->close ~ z_f14_late
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       195  -0.1481   0.0128    0.989   0.0708    108  -0.0862  -0.1164   -2.09
+B2 -1..-.33      396  -0.1724  -0.0249    1.338   0.0672    175  -0.1292  -0.1042   -2.56
+B3 -.33..33      326  -0.1531  -0.0060    1.074   0.0595    177  -0.0833  -0.1310   -2.57
+B4 .33..1        207   0.0099   0.0407    0.873   0.0607    132   0.0201   0.0377    0.16
+B5 z>1.0         190  -0.1143  -0.0673    1.019   0.0739    111  -0.1103  -0.0873   -1.55
+B5-B1                  0.0339                     0.1023                             0.33
+  date-level B5-B1 spread: n_dates=37 mean=+0.1559% median=-0.1688% sd=1.567 se=0.2576 t=0.61  (46% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.113(n=95)  B2 -0.257(n=200)  B3 -0.207(n=159)  B4 -0.018(n=109)  B5 -0.071(n=105)
+  [cond-window DOWN] B1 -0.181(n=100)  B2 -0.086(n=196)  B3 -0.101(n=167)  B4 +0.041(n=98)  B5 -0.168(n=85)
+  OLS ret_1400_close ~ z_f14_late + ret_open_1400 + |ret_open_1400| + symbol FE   (n=1314, 219 dates, date-clustered SE)
+     beta(z_f14_late) = +0.0323% per 1 sd of shape   se=0.0310   t=1.04
+     beta(ret_open_1400)=+0.0093  beta(|ret_open_1400|)=+0.0208
+
+[TRAIN] 14:00->close ~ z_tilt14
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       215  -0.2424  -0.0218    1.042   0.0711    123  -0.1669  -0.2141   -3.41
+B2 -1..-.33      309  -0.0959   0.0000    1.053   0.0599    169  -0.0771  -0.0689   -1.60
+B3 -.33..33      349  -0.1094   0.0216    1.238   0.0663    182  -0.0249  -0.0771   -1.65
+B4 .33..1        254  -0.0874   0.0056    1.221   0.0766    153  -0.0754  -0.0483   -1.14
+B5 z>1.0         187  -0.1317  -0.0744    0.871   0.0637    118  -0.1153  -0.1045   -2.07
+B5-B1                  0.1107                     0.0954                             1.16
+  date-level B5-B1 spread: n_dates=56 mean=+0.2835% median=+0.1658% sd=1.353 se=0.1808 t=1.57  (59% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.171(n=104)  B2 -0.162(n=159)  B3 -0.132(n=176)  B4 -0.231(n=137)  B5 -0.065(n=92)
+  [cond-window DOWN] B1 -0.309(n=111)  B2 -0.026(n=150)  B3 -0.086(n=173)  B4 +0.081(n=117)  B5 -0.197(n=95)
+  OLS ret_1400_close ~ z_tilt14 + ret_open_1400 + |ret_open_1400| + symbol FE   (n=1314, 219 dates, date-clustered SE)
+     beta(z_tilt14) = +0.0220% per 1 sd of shape   se=0.0322   t=0.68
+     beta(ret_open_1400)=+0.0098  beta(|ret_open_1400|)=+0.0204
+
+############################################################################################################
+### TEST  (5-MINUTE (exact 09:30-10:30 / 15:00-16:00 / 14:00 cut))   signal dates >= 2025-01-01
+############################################################################################################
+
+--- (a) NEXT-DAY open-to-close return %, by TODAY's full-day volume shape ---
+
+[TEST] next-day O->C ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       118  -0.5417  -0.1403    2.955   0.2720     64  -0.4030  -0.2704   -1.99
+B2 -1..-.33      189   0.4215   0.1707    3.349   0.2436    107   0.1532   0.1368    1.73
+B3 -.33..33      260   0.1205   0.0219    2.497   0.1548    123   0.0015   0.0153    0.78
+B4 .33..1        246   0.2359   0.1112    2.386   0.1521    123   0.1591   0.1554    1.55
+B5 z>1.0         141  -0.3679   0.0000    2.998   0.2525     80  -0.2581  -0.1676   -1.46
+B5-B1                  0.1738                     0.3711                             0.47
+  date-level B5-B1 spread: n_dates=20 mean=+0.4057% median=+0.2068% sd=3.367 se=0.7529 t=0.54  (50% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -1.243(n=52)  B2 +0.141(n=100)  B3 +0.010(n=139)  B4 +0.016(n=126)  B5 -0.397(n=73)
+  [cond-window DOWN] B1 +0.011(n=66)  B2 +0.737(n=89)  B3 +0.247(n=121)  B4 +0.467(n=120)  B5 -0.337(n=68)
+  OLS next_oc ~ z_f_first + ret_day + |ret_day| + symbol FE   (n=954, 162 dates, date-clustered SE)
+     beta(z_f_first) = +0.0073% per 1 sd of shape   se=0.1450   t=0.05
+     beta(ret_day)=-0.2314  beta(|ret_day|)=+0.1371
+
+[TEST] next-day O->C ~ z_f_mid
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       139  -0.6174  -0.0871    2.760   0.2341     81  -0.4913  -0.4971   -2.64
+B2 -1..-.33      214   0.1054   0.0959    2.332   0.1594    111   0.0312   0.1749    0.66
+B3 -.33..33      284   0.3961   0.0023    3.268   0.1939    132   0.0848   0.1107    2.04
+B4 .33..1        190   0.0140   0.0671    2.197   0.1594    109   0.0689   0.0989    0.09
+B5 z>1.0         127   0.0104   0.2422    3.158   0.2803     77   0.1071   0.2889    0.04
+B5-B1                  0.6279                     0.3652                             1.72
+  date-level B5-B1 spread: n_dates=25 mean=+0.4463% median=+0.8356% sd=2.961 se=0.5921 t=0.75  (68% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.487(n=76)  B2 +0.037(n=118)  B3 -0.113(n=142)  B4 -0.020(n=94)  B5 -0.427(n=60)
+  [cond-window DOWN] B1 -0.775(n=63)  B2 +0.189(n=96)  B3 +0.905(n=142)  B4 +0.047(n=96)  B5 +0.402(n=67)
+  OLS next_oc ~ z_f_mid + ret_day + |ret_day| + symbol FE   (n=954, 162 dates, date-clustered SE)
+     beta(z_f_mid) = +0.0594% per 1 sd of shape   se=0.1347   t=0.44
+     beta(ret_day)=-0.2320  beta(|ret_day|)=+0.1344
+
+[TEST] next-day O->C ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0        92  -0.3963   0.1662    3.086   0.3218     58  -0.2432  -0.0857   -1.23
+B2 -1..-.33      295   0.0053  -0.0088    2.315   0.1348    131  -0.0533  -0.0812    0.04
+B3 -.33..33      312   0.2819   0.1788    2.624   0.1486    138   0.2161   0.3415    1.90
+B4 .33..1        156   0.0352   0.0735    3.403   0.2725     98  -0.1007  -0.2816    0.13
+B5 z>1.0          99  -0.0538  -0.3871    3.324   0.3341     59  -0.2770  -0.2699   -0.16
+B5-B1                  0.3425                     0.4639                             0.74
+  date-level B5-B1 spread: n_dates=15 mean=-0.3566% median=-0.4603% sd=3.537 se=0.9131 t=-0.39  (40% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.550(n=46)  B2 -0.068(n=144)  B3 +0.165(n=167)  B4 -0.717(n=76)  B5 -0.247(n=57)
+  [cond-window DOWN] B1 -0.242(n=46)  B2 +0.075(n=151)  B3 +0.416(n=145)  B4 +0.749(n=80)  B5 +0.208(n=42)
+  OLS next_oc ~ z_f_last + ret_day + |ret_day| + symbol FE   (n=954, 162 dates, date-clustered SE)
+     beta(z_f_last) = -0.0648% per 1 sd of shape   se=0.0909   t=-0.71
+     beta(ret_day)=-0.2330  beta(|ret_day|)=+0.1404
+
+[TEST] next-day O->C ~ z_tilt
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       124  -0.2486   0.1189    2.940   0.2640     70  -0.1594  -0.0159   -0.94
+B2 -1..-.33      265  -0.0210   0.0330    2.358   0.1448    123  -0.0420   0.0472   -0.15
+B3 -.33..33      280   0.3362   0.1547    2.695   0.1611    135   0.1949   0.2401    2.09
+B4 .33..1        179   0.2729   0.0652    2.818   0.2107    105   0.1040   0.0890    1.30
+B5 z>1.0         106  -0.5037  -0.3895    3.718   0.3611     56  -0.5017  -0.2075   -1.40
+B5-B1                 -0.2551                     0.4473                            -0.57
+  date-level B5-B1 spread: n_dates=15 mean=-0.4523% median=-0.4945% sd=4.076 se=1.0525 t=-0.43  (47% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.264(n=64)  B2 -0.339(n=129)  B3 +0.311(n=157)  B4 +0.097(n=89)  B5 -1.429(n=51)
+  [cond-window DOWN] B1 -0.232(n=60)  B2 +0.281(n=136)  B3 +0.368(n=123)  B4 +0.447(n=90)  B5 +0.355(n=55)
+  OLS next_oc ~ z_tilt + ret_day + |ret_day| + symbol FE   (n=954, 162 dates, date-clustered SE)
+     beta(z_tilt) = -0.0258% per 1 sd of shape   se=0.1310   t=-0.20
+     beta(ret_day)=-0.2317  beta(|ret_day|)=+0.1384
+
+--- (a2) NEXT-DAY |open-to-close| return % (magnitude, not direction) ---
+
+[TEST] next-day |O->C| ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       118   1.9258   1.1611    2.299   0.2116     64   1.6424   1.7287    9.10
+B2 -1..-.33      189   1.9416   1.1484    2.757   0.2006    107   1.5312   1.6814    9.68
+B3 -.33..33      260   1.5529   0.8599    1.956   0.1213    123   1.2913   1.4588   12.80
+B4 .33..1        246   1.5408   0.9442    1.835   0.1170    123   1.2772   1.4818   13.17
+B5 z>1.0         141   1.8859   1.0497    2.354   0.1982     80   1.5610   1.7299    9.51
+B5-B1                 -0.0399                     0.2900                            -0.14
+  date-level B5-B1 spread: n_dates=20 mean=-0.7030% median=+0.1176% sd=3.169 se=0.7087 t=-0.99  (50% of dates positive)
+  monotone across buckets: NO
+
+[TEST] next-day |O->C| ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0        92   1.9647   1.1482    2.405   0.2507     58   1.6863   1.7254    7.84
+B2 -1..-.33      295   1.4808   0.8866    1.778   0.1035    131   1.2443   1.4197   14.31
+B3 -.33..33      312   1.6550   0.9204    2.054   0.1163    138   1.3668   1.6120   14.24
+B4 .33..1        156   1.9999   1.1886    2.749   0.2201     98   1.5729   1.7216    9.09
+B5 z>1.0          99   1.9893   1.3824    2.656   0.2670     59   1.6444   1.7941    7.45
+B5-B1                  0.0245                     0.3662                             0.07
+  date-level B5-B1 spread: n_dates=15 mean=+0.3591% median=+0.6861% sd=3.289 se=0.8493 t=0.42  (73% of dates positive)
+  monotone across buckets: NO
+
+--- (b) SAME-DAY 14:00-to-close return %, by shape measured only up to 14:00 ---
+
+[TEST] 14:00->close ~ z_f14_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       118  -0.1212  -0.0332    1.162   0.1070     71  -0.0751  -0.0837   -1.13
+B2 -1..-.33      187  -0.0005   0.0613    1.210   0.0885    106   0.0215   0.0749   -0.01
+B3 -.33..33      278   0.0308   0.0299    0.838   0.0502    133   0.0236   0.0581    0.61
+B4 .33..1        239   0.1000   0.0297    0.969   0.0627    120   0.0996   0.0756    1.60
+B5 z>1.0         152  -0.0971   0.0577    1.247   0.1011     84  -0.0819   0.0088   -0.96
+B5-B1                  0.0241                     0.1472                             0.16
+  date-level B5-B1 spread: n_dates=24 mean=+0.4296% median=+0.3555% sd=1.879 se=0.3836 t=1.12  (62% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.262(n=57)  B2 +0.203(n=85)  B3 +0.073(n=151)  B4 +0.055(n=117)  B5 +0.146(n=85)
+  [cond-window DOWN] B1 +0.011(n=61)  B2 -0.170(n=102)  B3 -0.020(n=127)  B4 +0.143(n=122)  B5 -0.406(n=67)
+  OLS ret_1400_close ~ z_f14_first + ret_open_1400 + |ret_open_1400| + symbol FE   (n=974, 164 dates, date-clustered SE)
+     beta(z_f14_first) = +0.0058% per 1 sd of shape   se=0.0436   t=0.13
+     beta(ret_open_1400)=+0.0490  beta(|ret_open_1400|)=-0.0224
+
+[TEST] 14:00->close ~ z_f14_late
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0        91  -0.1542  -0.0882    0.946   0.0992     57  -0.1477  -0.0608   -1.55
+B2 -1..-.33      331   0.0092   0.0289    1.018   0.0560    132   0.0168   0.0520    0.17
+B3 -.33..33      290   0.1079   0.0530    0.847   0.0497    129   0.0912   0.1254    2.17
+B4 .33..1        135  -0.0767   0.0873    1.326   0.1142     87  -0.0166  -0.0225   -0.67
+B5 z>1.0         127  -0.0525   0.0529    1.308   0.1161     54  -0.0580  -0.1742   -0.45
+B5-B1                  0.1017                     0.1527                             0.67
+  date-level B5-B1 spread: n_dates=10 mean=-0.1375% median=-0.3554% sd=0.797 se=0.2519 t=-0.55  (40% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 +0.027(n=46)  B2 +0.069(n=190)  B3 +0.132(n=145)  B4 -0.300(n=61)  B5 +0.320(n=53)
+  [cond-window DOWN] B1 -0.340(n=45)  B2 -0.072(n=141)  B3 +0.084(n=145)  B4 +0.107(n=74)  B5 -0.319(n=74)
+  OLS ret_1400_close ~ z_f14_late + ret_open_1400 + |ret_open_1400| + symbol FE   (n=974, 164 dates, date-clustered SE)
+     beta(z_f14_late) = +0.0213% per 1 sd of shape   se=0.0531   t=0.40
+     beta(ret_open_1400)=+0.0488  beta(|ret_open_1400|)=-0.0272
+
+[TEST] 14:00->close ~ z_tilt14
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       150  -0.2298  -0.0017    1.198   0.0978     85  -0.2060  -0.1270   -2.35
+B2 -1..-.33      240   0.1402   0.0493    0.973   0.0628    115   0.1297   0.1145    2.23
+B3 -.33..33      291   0.0672   0.0404    0.839   0.0492    129   0.0604   0.0937    1.37
+B4 .33..1        177   0.0577   0.0251    0.934   0.0702    105   0.0434   0.0136    0.82
+B5 z>1.0         116  -0.2212  -0.0211    1.534   0.1424     62  -0.1634  -0.3625   -1.55
+B5-B1                  0.0085                     0.1728                             0.05
+  date-level B5-B1 spread: n_dates=15 mean=-0.6111% median=-0.2732% sd=1.284 se=0.3316 t=-1.84  (33% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.009(n=85)  B2 +0.132(n=131)  B3 +0.108(n=142)  B4 +0.053(n=81)  B5 -0.068(n=56)
+  [cond-window DOWN] B1 -0.518(n=65)  B2 +0.150(n=109)  B3 +0.029(n=149)  B4 +0.062(n=96)  B5 -0.364(n=60)
+  OLS ret_1400_close ~ z_tilt14 + ret_open_1400 + |ret_open_1400| + symbol FE   (n=974, 164 dates, date-clustered SE)
+     beta(z_tilt14) = +0.0031% per 1 sd of shape   se=0.0455   t=0.07
+     beta(ret_open_1400)=+0.0490  beta(|ret_open_1400|)=-0.0235
+
+
+BREADTH REPLICATION on hourly bars. Definitions differ: 'last' bucket is the
+final 30 minutes (15:30-16:00) and the causal cut is 13:30, not 14:00.
+6 of these symbols overlap the 5-minute panel, so this is not independent.
+  POWER (1-hour panel): next-day O->C sd=2.73%; a 5-bucket split gives n~2284/bucket,
+    pooled se~0.057% so a true 0.25% bucket effect would land at t~4.4;
+    at the DATE level (408 dates, sd of daily mean=1.44%) se~0.071%, t~3.5.
+============================================================================================================
+PANEL 1-HOUR (28 equities/ETFs)   symbols=28  symbol-days=11562  dates=413  (2024-01-02 .. 2025-08-29)
+  TRAIN rows=6971 dates=249   TEST rows=4591 dates=164
+============================================================================================================
+  corr(f_first, day ret) = -0.036   corr(f_first, |day ret|) = +0.046   mean=0.2633 sd=0.0714
+  corr(f_last, day ret) = -0.006   corr(f_last, |day ret|) = -0.225   mean=0.1531 sd=0.0580
+  corr(tilt, day ret) = +0.020   corr(tilt, |day ret|) = -0.144   mean=-0.1103 sd=0.1133
+
+############################################################################################################
+### TRAIN  (1-HOUR (28 equities/ETFs))   signal dates < 2025-01-01
+############################################################################################################
+
+--- (a) NEXT-DAY open-to-close return %, by TODAY's full-day volume shape ---
+
+[TRAIN] next-day O->C ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       950  -0.1052  -0.0691    2.685   0.0871    196  -0.1387  -0.0559   -1.21
+B2 -1..-.33     1459  -0.0428  -0.0057    2.713   0.0710    213  -0.0747  -0.0736   -0.60
+B3 -.33..33     1576  -0.0696   0.0000    2.492   0.0628    215  -0.0775  -0.0455   -1.11
+B4 .33..1       1107  -0.1339  -0.0210    2.699   0.0811    211  -0.1202  -0.0844   -1.65
+B5 z>1.0         955   0.0727   0.0760    2.596   0.0840    203   0.0791   0.0149    0.87
+B5-B1                  0.1778                     0.1210                             1.47
+  date-level B5-B1 spread: n_dates=183 mean=-0.1043% median=+0.0801% sd=2.369 se=0.1752 t=-0.60  (54% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.014(n=437)  B2 +0.035(n=724)  B3 -0.240(n=811)  B4 -0.065(n=556)  B5 -0.033(n=461)
+  [cond-window DOWN] B1 -0.183(n=513)  B2 -0.120(n=735)  B3 +0.111(n=765)  B4 -0.203(n=551)  B5 +0.172(n=494)
+  OLS next_oc ~ z_f_first + ret_day + |ret_day| + symbol FE   (n=6047, 216 dates, date-clustered SE)
+     beta(z_f_first) = +0.0256% per 1 sd of shape   se=0.0470   t=0.54
+     beta(ret_day)=-0.0221  beta(|ret_day|)=-0.0085
+
+[TRAIN] next-day O->C ~ z_f_mid
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0      1000  -0.0519  -0.0277    2.753   0.0871    204  -0.0729  -0.1197   -0.60
+B2 -1..-.33     1284  -0.0311   0.0000    2.471   0.0690    216  -0.0122   0.0131   -0.45
+B3 -.33..33     1607  -0.1222  -0.0115    2.482   0.0619    216  -0.1135  -0.0956   -1.97
+B4 .33..1       1246   0.0051   0.0486    2.920   0.0827    213  -0.0303  -0.0355    0.06
+B5 z>1.0         910  -0.0759  -0.0551    2.555   0.0847    199  -0.1239  -0.1088   -0.90
+B5-B1                 -0.0240                     0.1215                            -0.20
+  date-level B5-B1 spread: n_dates=187 mean=+0.2442% median=-0.0831% sd=2.146 se=0.1569 t=1.56  (49% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.221(n=477)  B2 -0.018(n=630)  B3 -0.008(n=778)  B4 -0.076(n=639)  B5 -0.120(n=465)
+  [cond-window DOWN] B1 +0.102(n=523)  B2 -0.043(n=654)  B3 -0.230(n=829)  B4 +0.091(n=607)  B5 -0.030(n=445)
+  OLS next_oc ~ z_f_mid + ret_day + |ret_day| + symbol FE   (n=6047, 216 dates, date-clustered SE)
+     beta(z_f_mid) = -0.0012% per 1 sd of shape   se=0.0388   t=-0.03
+     beta(ret_day)=-0.0221  beta(|ret_day|)=-0.0098
+
+[TRAIN] next-day O->C ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       763  -0.2002   0.0000    2.795   0.1012    199  -0.1145  -0.1515   -1.98
+B2 -1..-.33     1531  -0.0461   0.0000    2.695   0.0689    214  -0.0519  -0.0805   -0.67
+B3 -.33..33     1652   0.0507   0.0000    2.648   0.0652    216  -0.0199   0.0100    0.78
+B4 .33..1       1091  -0.0773   0.0000    2.445   0.0740    213  -0.0757  -0.0448   -1.04
+B5 z>1.0        1010  -0.1258  -0.0904    2.569   0.0808    210  -0.1376  -0.0783   -1.56
+B5-B1                  0.0744                     0.1295                             0.57
+  date-level B5-B1 spread: n_dates=193 mean=+0.2261% median=+0.0252% sd=2.180 se=0.1569 t=1.44  (50% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.281(n=381)  B2 -0.016(n=765)  B3 -0.017(n=839)  B4 -0.107(n=541)  B5 -0.077(n=463)
+  [cond-window DOWN] B1 -0.120(n=382)  B2 -0.076(n=766)  B3 +0.120(n=813)  B4 -0.048(n=550)  B5 -0.167(n=547)
+  OLS next_oc ~ z_f_last + ret_day + |ret_day| + symbol FE   (n=6047, 216 dates, date-clustered SE)
+     beta(z_f_last) = -0.0127% per 1 sd of shape   se=0.0431   t=-0.30
+     beta(ret_day)=-0.0223  beta(|ret_day|)=-0.0095
+
+[TRAIN] next-day O->C ~ z_tilt
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       895   0.0311   0.0740    2.666   0.0891    205   0.0407   0.0689    0.35
+B2 -1..-.33     1242  -0.1806  -0.0503    2.642   0.0750    211  -0.1448  -0.2402   -2.41
+B3 -.33..33     1582   0.0598   0.0441    2.637   0.0663    215   0.0051   0.0277    0.90
+B4 .33..1       1299  -0.1185  -0.0198    2.559   0.0710    212  -0.1243  -0.1399   -1.67
+B5 z>1.0        1029  -0.0924  -0.0921    2.665   0.0831    204  -0.1191  -0.0486   -1.11
+B5-B1                 -0.1235                     0.1218                            -1.01
+  date-level B5-B1 spread: n_dates=193 mean=+0.2032% median=-0.0708% sd=2.219 se=0.1598 t=1.27  (48% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.033(n=441)  B2 -0.171(n=625)  B3 -0.066(n=802)  B4 -0.152(n=650)  B5 +0.098(n=471)
+  [cond-window DOWN] B1 +0.094(n=454)  B2 -0.190(n=617)  B3 +0.189(n=780)  B4 -0.085(n=649)  B5 -0.253(n=558)
+  OLS next_oc ~ z_tilt + ret_day + |ret_day| + symbol FE   (n=6047, 216 dates, date-clustered SE)
+     beta(z_tilt) = -0.0270% per 1 sd of shape   se=0.0493   t=-0.55
+     beta(ret_day)=-0.0223  beta(|ret_day|)=-0.0085
+
+--- (a2) NEXT-DAY |open-to-close| return % (magnitude, not direction) ---
+
+[TRAIN] next-day |O->C| ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       950   1.6816   0.9610    2.095   0.0680    196   1.3907   1.6562   24.74
+B2 -1..-.33     1459   1.6273   0.9524    2.171   0.0568    213   1.3259   1.6065   28.64
+B3 -.33..33     1576   1.5746   0.9684    1.932   0.0487    215   1.3082   1.5562   32.36
+B4 .33..1       1107   1.6469   0.9510    2.142   0.0644    211   1.3504   1.6098   25.58
+B5 z>1.0         955   1.6266   0.9570    2.024   0.0655    203   1.3334   1.5841   24.84
+B5-B1                 -0.0550                     0.0944                            -0.58
+  date-level B5-B1 spread: n_dates=183 mean=-0.1415% median=-0.0712% sd=1.946 se=0.1439 t=-0.98  (46% of dates positive)
+  monotone across buckets: NO
+
+[TRAIN] next-day |O->C| ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       763   1.7269   1.0210    2.206   0.0798    199   1.4057   1.6905   21.63
+B2 -1..-.33     1531   1.6326   0.9662    2.145   0.0548    214   1.3310   1.6055   29.79
+B3 -.33..33     1652   1.6243   0.9577    2.092   0.0515    216   1.3299   1.5903   31.56
+B4 .33..1       1091   1.5314   0.8916    1.907   0.0577    213   1.2732   1.5124   26.52
+B5 z>1.0        1010   1.6422   0.9872    1.979   0.0623    210   1.3717   1.6192   26.37
+B5-B1                 -0.0847                     0.1013                            -0.84
+  date-level B5-B1 spread: n_dates=193 mean=+0.0917% median=+0.0462% sd=1.785 se=0.1285 t=0.71  (51% of dates positive)
+  monotone across buckets: NO
+
+--- (b) SAME-DAY 14:00-to-close return %, by shape measured only up to 14:00 ---
+
+[TRAIN] 14:00->close ~ z_f14_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       979  -0.0537   0.0000    1.141   0.0365    210  -0.0362  -0.0736   -1.47
+B2 -1..-.33     1303  -0.0245   0.0098    1.051   0.0291    217   0.0035   0.0041   -0.84
+B3 -.33..33     1623  -0.0606   0.0000    1.154   0.0286    219  -0.0450  -0.0246   -2.12
+B4 .33..1       1250  -0.0405   0.0000    1.137   0.0322    218  -0.0179  -0.0191   -1.26
+B5 z>1.0         976  -0.0457   0.0193    1.149   0.0368    210  -0.0224  -0.0221   -1.24
+B5-B1                  0.0080                     0.0518                             0.15
+  date-level B5-B1 spread: n_dates=201 mean=+0.0225% median=-0.0176% sd=0.930 se=0.0656 t=0.34  (49% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.035(n=457)  B2 +0.022(n=664)  B3 -0.105(n=843)  B4 -0.038(n=627)  B5 +0.005(n=476)
+  [cond-window DOWN] B1 -0.070(n=522)  B2 -0.073(n=639)  B3 -0.013(n=780)  B4 -0.043(n=623)  B5 -0.094(n=500)
+  OLS ret_1400_close ~ z_f14_first + ret_open_1400 + |ret_open_1400| + symbol FE   (n=6131, 219 dates, date-clustered SE)
+     beta(z_f14_first) = +0.0007% per 1 sd of shape   se=0.0186   t=0.04
+     beta(ret_open_1400)=+0.0200  beta(|ret_open_1400|)=+0.0176
+
+[TRAIN] 14:00->close ~ z_f14_late
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       879  -0.1010   0.0000    1.195   0.0403    201  -0.0522  -0.0770   -2.51
+B2 -1..-.33     1727  -0.0167   0.0019    1.078   0.0259    218  -0.0113  -0.0012   -0.65
+B3 -.33..33     1664  -0.0343   0.0094    1.195   0.0293    219  -0.0091   0.0066   -1.17
+B4 .33..1        934  -0.0664   0.0000    1.040   0.0340    208  -0.0401  -0.0382   -1.95
+B5 z>1.0         927  -0.0447   0.0000    1.105   0.0363    208  -0.0327  -0.0234   -1.23
+B5-B1                  0.0564                     0.0542                             1.04
+  date-level B5-B1 spread: n_dates=190 mean=+0.0163% median=-0.0363% sd=0.859 se=0.0623 t=0.26  (47% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.017(n=410)  B2 -0.061(n=867)  B3 -0.059(n=858)  B4 -0.029(n=474)  B5 +0.028(n=458)
+  [cond-window DOWN] B1 -0.175(n=469)  B2 +0.028(n=860)  B3 -0.009(n=806)  B4 -0.104(n=460)  B5 -0.116(n=469)
+  OLS ret_1400_close ~ z_f14_late + ret_open_1400 + |ret_open_1400| + symbol FE   (n=6131, 219 dates, date-clustered SE)
+     beta(z_f14_late) = +0.0153% per 1 sd of shape   se=0.0171   t=0.90
+     beta(ret_open_1400)=+0.0198  beta(|ret_open_1400|)=+0.0172
+
+[TRAIN] 14:00->close ~ z_tilt14
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       965  -0.0650   0.0223    1.176   0.0378    210  -0.0366  -0.0413   -1.72
+B2 -1..-.33     1319  -0.0367   0.0000    1.133   0.0312    216  -0.0251  -0.0162   -1.18
+B3 -.33..33     1698  -0.0183   0.0155    1.149   0.0279    218   0.0008   0.0206   -0.66
+B4 .33..1       1230  -0.0932   0.0000    1.041   0.0297    217  -0.0586  -0.0691   -3.14
+B5 z>1.0         919  -0.0231   0.0000    1.129   0.0372    203  -0.0092  -0.0021   -0.62
+B5-B1                  0.0419                     0.0531                             0.79
+  date-level B5-B1 spread: n_dates=194 mean=+0.0058% median=+0.0693% sd=0.867 se=0.0623 t=0.09  (54% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.015(n=466)  B2 -0.064(n=668)  B3 -0.008(n=864)  B4 -0.126(n=622)  B5 +0.054(n=447)
+  [cond-window DOWN] B1 -0.112(n=499)  B2 -0.008(n=651)  B3 -0.029(n=834)  B4 -0.060(n=608)  B5 -0.096(n=472)
+  OLS ret_1400_close ~ z_tilt14 + ret_open_1400 + |ret_open_1400| + symbol FE   (n=6131, 219 dates, date-clustered SE)
+     beta(z_tilt14) = +0.0059% per 1 sd of shape   se=0.0188   t=0.32
+     beta(ret_open_1400)=+0.0199  beta(|ret_open_1400|)=+0.0173
+
+############################################################################################################
+### TEST  (1-HOUR (28 equities/ETFs))   signal dates >= 2025-01-01
+############################################################################################################
+
+--- (a) NEXT-DAY open-to-close return %, by TODAY's full-day volume shape ---
+
+[TEST] next-day O->C ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       602  -0.2772  -0.1241    2.552   0.1040    145  -0.2517  -0.1631   -2.67
+B2 -1..-.33     1001   0.2573   0.0930    2.895   0.0915    158   0.1186   0.1099    2.81
+B3 -.33..33     1295   0.2295   0.1276    2.829   0.0786    160   0.1272   0.1065    2.92
+B4 .33..1        986   0.1965   0.1437    2.791   0.0889    155   0.1319   0.1507    2.21
+B5 z>1.0         650  -0.2147   0.0000    3.024   0.1186    145  -0.1734  -0.0890   -1.81
+B5-B1                  0.0625                     0.1578                             0.40
+  date-level B5-B1 spread: n_dates=129 mean=+0.0840% median=+0.2127% sd=2.202 se=0.1939 t=0.43  (56% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.560(n=311)  B2 -0.038(n=512)  B3 +0.017(n=673)  B4 +0.035(n=536)  B5 -0.221(n=320)
+  [cond-window DOWN] B1 +0.025(n=291)  B2 +0.566(n=489)  B3 +0.459(n=622)  B4 +0.389(n=450)  B5 -0.209(n=330)
+  OLS next_oc ~ z_f_first + ret_day + |ret_day| + symbol FE   (n=4534, 162 dates, date-clustered SE)
+     beta(z_f_first) = -0.0328% per 1 sd of shape   se=0.0777   t=-0.42
+     beta(ret_day)=-0.1798  beta(|ret_day|)=+0.0412
+
+[TEST] next-day O->C ~ z_f_mid
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       651  -0.2109   0.0892    2.837   0.1112    144  -0.1447  -0.1414   -1.90
+B2 -1..-.33     1031   0.1610   0.1110    2.753   0.0857    155   0.0793   0.2213    1.88
+B3 -.33..33     1287   0.2643   0.1241    2.926   0.0816    160   0.1416   0.1144    3.24
+B4 .33..1        851   0.2057   0.0652    2.948   0.1011    160   0.1110   0.1087    2.03
+B5 z>1.0         714  -0.1426   0.0000    2.615   0.0979    154  -0.1468  -0.0358   -1.46
+B5-B1                  0.0683                     0.1481                             0.46
+  date-level B5-B1 spread: n_dates=136 mean=+0.0383% median=+0.2885% sd=2.354 se=0.2018 t=0.19  (56% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.379(n=332)  B2 +0.091(n=557)  B3 +0.025(n=652)  B4 -0.026(n=465)  B5 -0.470(n=346)
+  [cond-window DOWN] B1 -0.036(n=319)  B2 +0.243(n=474)  B3 +0.510(n=635)  B4 +0.485(n=386)  B5 +0.166(n=368)
+  OLS next_oc ~ z_f_mid + ret_day + |ret_day| + symbol FE   (n=4534, 162 dates, date-clustered SE)
+     beta(z_f_mid) = +0.0202% per 1 sd of shape   se=0.0697   t=0.29
+     beta(ret_day)=-0.1796  beta(|ret_day|)=+0.0419
+
+[TEST] next-day O->C ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       578  -0.1511   0.0598    3.097   0.1288    143  -0.1869   0.0092   -1.17
+B2 -1..-.33     1215   0.0414   0.0578    2.769   0.0794    161   0.0285  -0.0135    0.52
+B3 -.33..33     1435   0.2201   0.0855    2.851   0.0753    162   0.1230   0.1011    2.92
+B4 .33..1        798   0.1509   0.1177    2.597   0.0919    160   0.0504   0.0841    1.64
+B5 z>1.0         508   0.0843   0.1085    2.989   0.1326    142   0.0045  -0.0603    0.64
+B5-B1                  0.2355                     0.1849                             1.27
+  date-level B5-B1 spread: n_dates=123 mean=+0.1171% median=+0.0757% sd=2.245 se=0.2024 t=0.58  (52% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.343(n=284)  B2 -0.046(n=605)  B3 -0.030(n=750)  B4 -0.096(n=441)  B5 -0.160(n=272)
+  [cond-window DOWN] B1 +0.035(n=294)  B2 +0.128(n=610)  B3 +0.494(n=685)  B4 +0.456(n=357)  B5 +0.366(n=236)
+  OLS next_oc ~ z_f_last + ret_day + |ret_day| + symbol FE   (n=4534, 162 dates, date-clustered SE)
+     beta(z_f_last) = +0.0245% per 1 sd of shape   se=0.0549   t=0.45
+     beta(ret_day)=-0.1793  beta(|ret_day|)=+0.0424
+
+[TEST] next-day O->C ~ z_tilt
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       648  -0.1176   0.0822    3.070   0.1206    140  -0.0912   0.0418   -0.97
+B2 -1..-.33     1015   0.1572   0.1195    2.860   0.0898    159   0.0881   0.2075    1.75
+B3 -.33..33     1408   0.1327   0.0705    2.620   0.0698    162   0.0616   0.0600    1.90
+B4 .33..1        917   0.1839   0.0652    2.951   0.0975    155   0.0606   0.0363    1.89
+B5 z>1.0         546   0.0059   0.0648    2.838   0.1215    139  -0.0421   0.1310    0.05
+B5-B1                  0.1235                     0.1712                             0.72
+  date-level B5-B1 spread: n_dates=117 mean=+0.0254% median=-0.0186% sd=2.263 se=0.2092 t=0.12  (49% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.216(n=315)  B2 -0.039(n=533)  B3 +0.066(n=732)  B4 -0.155(n=495)  B5 -0.423(n=277)
+  [cond-window DOWN] B1 -0.025(n=333)  B2 +0.375(n=482)  B3 +0.204(n=676)  B4 +0.581(n=422)  B5 +0.448(n=269)
+  OLS next_oc ~ z_tilt + ret_day + |ret_day| + symbol FE   (n=4534, 162 dates, date-clustered SE)
+     beta(z_tilt) = +0.0445% per 1 sd of shape   se=0.0744   t=0.60
+     beta(ret_day)=-0.1798  beta(|ret_day|)=+0.0409
+
+--- (a2) NEXT-DAY |open-to-close| return % (magnitude, not direction) ---
+
+[TEST] next-day |O->C| ~ z_f_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       602   1.7286   1.1101    1.896   0.0773    145   1.4949   1.6715   22.37
+B2 -1..-.33     1001   1.7987   1.0755    2.282   0.0721    158   1.4744   1.6700   24.93
+B3 -.33..33     1295   1.7133   1.0158    2.263   0.0629    160   1.3800   1.6042   27.25
+B4 .33..1        986   1.7822   1.0629    2.156   0.0687    155   1.4881   1.7576   25.96
+B5 z>1.0         650   1.9570   1.1856    2.315   0.0908    145   1.6583   1.8696   21.56
+B5-B1                  0.2284                     0.1192                             1.92
+  date-level B5-B1 spread: n_dates=129 mean=+0.1567% median=+0.2352% sd=1.796 se=0.1582 t=0.99  (59% of dates positive)
+  monotone across buckets: NO
+
+[TEST] next-day |O->C| ~ z_f_last
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       578   2.0383   1.2061    2.336   0.0971    143   1.7690   1.9351   20.98
+B2 -1..-.33     1215   1.7571   1.0833    2.140   0.0614    161   1.4676   1.7208   28.62
+B3 -.33..33     1435   1.7396   1.0151    2.269   0.0599    162   1.4071   1.6356   29.05
+B4 .33..1        798   1.6488   1.0368    2.011   0.0712    160   1.3663   1.5914   23.16
+B5 z>1.0         508   1.8977   1.2069    2.310   0.1025    142   1.5814   1.7712   18.52
+B5-B1                 -0.1406                     0.1412                            -1.00
+  date-level B5-B1 spread: n_dates=123 mean=-0.0122% median=+0.1769% sd=1.919 se=0.1730 t=-0.07  (52% of dates positive)
+  monotone across buckets: NO
+
+--- (b) SAME-DAY 14:00-to-close return %, by shape measured only up to 14:00 ---
+
+[TEST] 14:00->close ~ z_f14_first
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       605   0.1501   0.0712    1.272   0.0517    153   0.1059   0.1048    2.90
+B2 -1..-.33      907   0.1385   0.0458    1.343   0.0446    161   0.0997   0.0572    3.11
+B3 -.33..33     1353   0.0245   0.0000    1.008   0.0274    163   0.0194   0.0101    0.89
+B4 .33..1       1037   0.0004   0.0350    1.023   0.0318    159   0.0009   0.0158    0.01
+B5 z>1.0         689  -0.0458   0.0349    1.256   0.0478    146  -0.0244   0.0140   -0.96
+B5-B1                 -0.1959                     0.0704                            -2.78
+  date-level B5-B1 spread: n_dates=135 mean=-0.0535% median=-0.1276% sd=0.979 se=0.0842 t=-0.63  (44% of dates positive)
+  monotone across buckets: YES (decreasing)
+  [cond-window UP  ] B1 +0.178(n=314)  B2 +0.209(n=473)  B3 +0.065(n=699)  B4 -0.004(n=548)  B5 +0.041(n=345)
+  [cond-window DOWN] B1 +0.120(n=291)  B2 +0.061(n=434)  B3 -0.018(n=654)  B4 +0.006(n=489)  B5 -0.132(n=344)
+  OLS ret_1400_close ~ z_f14_first + ret_open_1400 + |ret_open_1400| + symbol FE   (n=4591, 164 dates, date-clustered SE)
+     beta(z_f14_first) = -0.0618% per 1 sd of shape   se=0.0303   t=-2.04
+     beta(ret_open_1400)=+0.0520  beta(|ret_open_1400|)=+0.0174
+
+[TEST] 14:00->close ~ z_f14_late
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       499  -0.1512  -0.0421    1.151   0.0515    137  -0.1234  -0.1130   -2.93
+B2 -1..-.33     1476   0.0091   0.0011    1.050   0.0273    159   0.0075   0.0344    0.33
+B3 -.33..33     1323   0.0978   0.0638    1.018   0.0280    163   0.0828   0.0796    3.49
+B4 .33..1        722   0.0352   0.0586    1.099   0.0409    161   0.0409   0.0587    0.86
+B5 z>1.0         571   0.2200   0.0091    1.677   0.0702    148   0.1268   0.0342    3.13
+B5-B1                  0.3712                     0.0871                             4.26
+  date-level B5-B1 spread: n_dates=122 mean=+0.0733% median=+0.0850% sd=1.029 se=0.0931 t=0.79  (56% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.174(n=240)  B2 +0.041(n=793)  B3 +0.092(n=703)  B4 +0.059(n=352)  B5 +0.466(n=291)
+  [cond-window DOWN] B1 -0.130(n=259)  B2 -0.028(n=683)  B3 +0.105(n=620)  B4 +0.012(n=370)  B5 -0.035(n=280)
+  OLS ret_1400_close ~ z_f14_late + ret_open_1400 + |ret_open_1400| + symbol FE   (n=4591, 164 dates, date-clustered SE)
+     beta(z_f14_late) = +0.0800% per 1 sd of shape   se=0.0479   t=1.67
+     beta(ret_open_1400)=+0.0518  beta(|ret_open_1400|)=+0.0151
+
+[TEST] 14:00->close ~ z_tilt14
+bucket             n    mean%  median%       sd       se  dates   trim5%   drop1d       t
+B1 z<=-1.0       629  -0.1214   0.0000    1.256   0.0501    144  -0.0876  -0.0524   -2.42
+B2 -1..-.33     1168   0.0067   0.0288    1.020   0.0298    160   0.0025  -0.0105    0.22
+B3 -.33..33     1349   0.0713   0.0350    0.950   0.0259    162   0.0553   0.0581    2.75
+B4 .33..1        860   0.0699   0.0623    1.188   0.0405    160   0.0735   0.0482    1.72
+B5 z>1.0         585   0.2235   0.0454    1.604   0.0663    147   0.1290   0.0499    3.37
+B5-B1                  0.3449                     0.0831                             4.15
+  date-level B5-B1 spread: n_dates=128 mean=+0.0446% median=-0.0615% sd=1.178 se=0.1041 t=0.43  (49% of dates positive)
+  monotone across buckets: NO
+  [cond-window UP  ] B1 -0.039(n=316)  B2 +0.017(n=620)  B3 +0.078(n=699)  B4 +0.082(n=438)  B5 +0.402(n=306)
+  [cond-window DOWN] B1 -0.205(n=313)  B2 -0.005(n=548)  B3 +0.064(n=650)  B4 +0.058(n=422)  B5 +0.027(n=279)
+  OLS ret_1400_close ~ z_tilt14 + ret_open_1400 + |ret_open_1400| + symbol FE   (n=4591, 164 dates, date-clustered SE)
+     beta(z_tilt14) = +0.0758% per 1 sd of shape   se=0.0344   t=2.20
+     beta(ret_open_1400)=+0.0519  beta(|ret_open_1400|)=+0.0155
+
+============================================================================================================
+APPENDIX -- wide 191-symbol 5min_ext cross-section
+  191 symbols but only 3 distinct session dates (2026-09-01, 2026-09-02, 2026-09-03). A cross-section this
+  narrow in TIME cannot test a daily effect at all -- any 'n' it produces is
+  ~573 observations riding on 3 days. Not measured.
+============================================================================================================
+
+############################################################################################################
+SUMMARY -- every test in one place.
+beta = % return per +1 sd of the shape variable, from OLS with the conditioning
+window's return, its absolute value, and symbol fixed effects as controls;
+t uses DATE-CLUSTERED standard errors (the honest ones -- pooled t is inflated
+because symbols move together within a day).
+############################################################################################################
+panel / shape var -> outcome                      TRAIN beta       t  TEST beta       t same sign
+------------------------------------------------------------------------------------------------------------
+5-MINUTE  z_f_first                -> next_oc        +0.0312    0.38    +0.0073    0.05      yes
+5-MINUTE  z_f_mid                  -> next_oc        +0.1108    1.39    +0.0594    0.44      yes
+5-MINUTE  z_f_last                 -> next_oc        -0.1218   -1.54    -0.0648   -0.71      yes
+5-MINUTE  z_tilt                   -> next_oc        -0.0908   -1.10    -0.0258   -0.20      yes
+5-MINUTE  z_f14_first              -> ret_1400_close    -0.0127   -0.38    +0.0058    0.13       no
+5-MINUTE  z_f14_late               -> ret_1400_close    +0.0323    1.04    +0.0213    0.40      yes
+5-MINUTE  z_tilt14                 -> ret_1400_close    +0.0220    0.68    +0.0031    0.07      yes
+1-HOUR  z_f_first                  -> next_oc        +0.0256    0.54    -0.0328   -0.42       no
+1-HOUR  z_f_mid                    -> next_oc        -0.0012   -0.03    +0.0202    0.29       no
+1-HOUR  z_f_last                   -> next_oc        -0.0127   -0.30    +0.0245    0.45       no
+1-HOUR  z_tilt                     -> next_oc        -0.0270   -0.55    +0.0445    0.60       no
+1-HOUR  z_f14_first                -> ret_1400_close    +0.0007    0.04    -0.0618   -2.04       no
+1-HOUR  z_f14_late                 -> ret_1400_close    +0.0153    0.90    +0.0800    1.67      yes
+1-HOUR  z_tilt14                   -> ret_1400_close    +0.0059    0.32    +0.0758    2.20      yes
+------------------------------------------------------------------------------------------------------------
+TRAIN/TEST sign agreement: 8 of 14 (57%) -- a coin flip is 7.
+Largest |beta| anywhere: 0.1218% per sd, vs a 0.25% per-trade cost hurdle.
+A +-2 sd shape move would therefore be worth at most 0.487% -- under cost.
+
+STRONGEST SINGLE CELL ON TRAIN, FOLLOWED TO TEST
+  5-MINUTE  z_tilt14  bucket B1 z<=-1.0  ->  ret_1400_close
+    TRAIN: mean=-0.2424% median=-0.0218% sd=1.042 se=0.0711 n=215 dates=123 t=-3.41 trim5%=-0.1669 drop-worst-date=-0.2141
+    TEST : mean=-0.2298% median=-0.0017% sd=1.198 se=0.0978 n=150 dates=85 t=-2.35 trim5%=-0.2060 drop-worst-date=-0.1270
+    TEST retains 95% of the TRAIN effect.
+
+############################################################################################################
+FOLLOW-UP -- the one cell that replicated, tested as its own hypothesis
+RULE: z_tilt14 <= -1.0  ->  short at 14:00, cover at 15:55 close
+############################################################################################################
+
+--- 5-MINUTE ---
+  TRAIN signalled : n= 215 dates=123 mean=-0.2424% med=-0.0218% sd=1.042 se=0.0711 t=-3.41 trim5%=-0.1669 drop1d=-0.2141
+  TRAIN rest      : n=1099 dates=218 mean=-0.1043%   |  ALL: mean=-0.1269% (the drift the signal must beat)
+  TRAIN RAW EDGE vs rest = -0.1381%
+  TRAIN DATE-LEVEL excess: n_dates=122 mean=-0.1485% med=-0.1157% sd=1.043 se=0.0944 t=-1.57 (58% of dates negative)
+  TRAIN NET AFTER 0.25% COST (short): -0.0076% per trade  -> LOSES MONEY
+  TRAIN by symbol: AAPL -0.136(n=34)  MARA -0.884(n=33)  NVDA -0.405(n=33)  QQQ +0.018(n=34)  SPY +0.032(n=39)  TSLA -0.163(n=42)
+  TRAIN by half-year: 2024H1 -0.086(n=102)  2024H2 -0.383(n=113)
+  TRAIN leave-one-symbol-out mean: ex-AAPL -0.262  ex-MARA -0.126  ex-NVDA -0.213  ex-QQQ -0.291  ex-SPY -0.303  ex-TSLA -0.262
+  TEST signalled : n= 150 dates= 85 mean=-0.2298% med=-0.0017% sd=1.198 se=0.0978 t=-2.35 trim5%=-0.2060 drop1d=-0.1270
+  TEST rest      : n= 824 dates=162 mean=+0.0458%   |  ALL: mean=+0.0034% (the drift the signal must beat)
+  TEST RAW EDGE vs rest = -0.2756%
+  TEST DATE-LEVEL excess: n_dates=83 mean=-0.0572% med=-0.0770% sd=0.823 se=0.0904 t=-0.63 (58% of dates negative)
+  TEST NET AFTER 0.25% COST (short): -0.0202% per trade  -> LOSES MONEY
+  TEST by symbol: AAPL +0.141(n=21)  MARA -0.883(n=22)  NVDA -0.136(n=28)  QQQ -0.074(n=33)  SPY -0.130(n=23)  TSLA -0.381(n=23)
+  TEST by half-year: 2025H1 -0.293(n=110)  2025H2 -0.055(n=40)
+  TEST leave-one-symbol-out mean: ex-AAPL -0.290  ex-MARA -0.118  ex-NVDA -0.251  ex-QQQ -0.274  ex-SPY -0.248  ex-TSLA -0.202
+
+--- 1-HOUR (13:30 cut, different bars) ---
+  TRAIN signalled : n= 965 dates=210 mean=-0.0650% med=+0.0223% sd=1.176 se=0.0378 t=-1.72 trim5%=-0.0366 drop1d=-0.0413
+  TRAIN rest      : n=5166 dates=219 mean=-0.0417%   |  ALL: mean=-0.0454% (the drift the signal must beat)
+  TRAIN RAW EDGE vs rest = -0.0233%
+  TRAIN DATE-LEVEL excess: n_dates=210 mean=+0.0118% med=-0.0370% sd=0.615 se=0.0424 t=+0.28 (51% of dates negative)
+  TRAIN NET AFTER 0.25% COST (short): -0.1850% per trade  -> LOSES MONEY
+  TEST signalled : n= 629 dates=144 mean=-0.1214% med=+0.0000% sd=1.256 se=0.0501 t=-2.42 trim5%=-0.0876 drop1d=-0.0524
+  TEST rest      : n=3962 dates=164 mean=+0.0744%   |  ALL: mean=+0.0476% (the drift the signal must beat)
+  TEST RAW EDGE vs rest = -0.1958%
+  TEST DATE-LEVEL excess: n_dates=144 mean=-0.0488% med=-0.0135% sd=0.698 se=0.0581 t=-0.84 (50% of dates negative)
+  TEST NET AFTER 0.25% COST (short): -0.1286% per trade  -> LOSES MONEY
+
+============================================================================================================
+VERDICT -- NEGATIVE. Volume shape does not predict next-day open-to-close
+return at all: 14 controlled slopes across two panels, largest |beta| 0.12% per
+sd, TRAIN/TEST sign agreement 8/14 (a coin flip), nothing monotone, and the
+1-hour panel is powered to see a 0.25% bucket effect at t~4.4 and sees nothing.
+
+One cell DID replicate and deserves the explicit refutation above: an unusually
+front-loaded morning (z_tilt14 <= -1) preceded a 14:00->close return of -0.242%
+on TRAIN and -0.230% on TEST. It fails anyway, four separate ways:
+  1. COST. Shorting it grosses 0.24%/0.23%, under the 0.25% hurdle -- net
+     -0.008% (TRAIN) and -0.020% (TEST) per trade. It loses money as a rule.
+  2. DRIFT. Most of TRAIN is just the afternoon drifting down for everything
+     that year (all names averaged -0.104%). Netting out the un-signalled names
+     on the same date leaves t=-1.57 (TRAIN) and t=-0.63 (TEST) -- under 2 SE.
+  3. ONE SYMBOL. MARA alone averages -0.88% in both splits; excluding it halves
+     the effect (-0.242->-0.126 TRAIN, -0.230->-0.118 TEST). Excluding any other
+     single name changes nothing. This is one high-beta miner, not a shape law.
+  4. TAIL, NOT CENTRE. The median signalled day is -0.02% (TRAIN) and -0.00%
+     (TEST); trimming 5% each tail leaves -0.167%/-0.206%. A mean built from a
+     left tail is not something a 14:00 entry can harvest.
+
+Do not trade volume shape. The honest use of participation timing here is as a
+descriptive context feature, not a signal.
+============================================================================================================

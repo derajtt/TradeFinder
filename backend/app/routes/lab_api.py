@@ -62,13 +62,23 @@ def wilson_lb(wins: int, n: int, z: float = 1.96) -> Optional[float]:
     return round((centre - rad) / den, 4)
 
 
-def confidence_label(n: Optional[int]) -> str:
-    """Sample-size confidence: <30 VERY LOW, 30-99 LOW, 100-499 MODERATE, 500+ HIGH."""
+def confidence_label(n: Optional[int], dates: Optional[int] = None) -> str:
+    """Sample-size confidence: <30 VERY LOW, 30-99 LOW, 100-499 MODERATE, 500+ HIGH.
+
+    Trades on the same session are not independent observations — in a market-wide
+    move twenty of them are closer to one.  Research on this platform's own data
+    kept producing effects that looked strong on hundreds of trades and evaporated
+    once the count was taken in independent sessions instead, so when the number of
+    distinct signal dates is known it caps the label.
+    """
     if n is None or n < 30:
         return "VERY LOW"
-    if n < 100:
+    eff = n if dates is None else min(n, dates * 3)
+    if eff < 30:
+        return "VERY LOW"
+    if eff < 100:
         return "LOW"
-    if n < 500:
+    if eff < 500:
         return "MODERATE"
     return "HIGH"
 
@@ -439,11 +449,34 @@ def _market_expectancy(s: LabStrategy, runs: Sequence[LabRun]) -> Dict[str, Opti
     return out
 
 
-def leaderboard_rows(strats: Sequence[LabStrategy], runs: Sequence[LabRun]) -> List[Dict[str, Any]]:
+async def _dates_by_strategy(db: AsyncSession, ids: Sequence[str]) -> Dict[str, int]:
+    """Distinct ET session dates each strategy actually signalled on.
+
+    Trade count overstates independence: a strategy with 49 trades across 6
+    sessions has roughly 6 independent observations, not 49.  Ten research
+    probes on this platform died on exactly that distinction.
+    """
+    if not ids:
+        return {}
+    rows = (await db.execute(
+        select(LabTrade.strategy_id, LabTrade.signal_time)
+        .where(LabTrade.strategy_id.in_(list(ids)),
+               LabTrade.signal_time.is_not(None)))).all()
+    seen: Dict[str, set] = {}
+    for sid, ts in rows:
+        if ts is not None:
+            seen.setdefault(sid, set()).add(_et_day(ts))
+    return {k: len(v) for k, v in seen.items()}
+
+
+def leaderboard_rows(strats: Sequence[LabStrategy], runs: Sequence[LabRun],
+                     dates: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
     rows = []
+    dates = dates or {}
     for s in strats:
         head = headline_run(s, runs)
         hs = run_summary(head) if head else None
+        n_dates = dates.get(s.strategy_id)
         rows.append({
             "strategy_id": s.strategy_id, "name": s.name, "family": s.family,
             "stage": s.stage, "composite": s.composite_score,
@@ -454,7 +487,8 @@ def leaderboard_rows(strats: Sequence[LabStrategy], runs: Sequence[LabRun]) -> L
             "trades": hs["n"] if hs else None,
             "win_rate": hs["win_rate"] if hs else None,
             "wilson_lb": hs["wilson_lb"] if hs else None,
-            "confidence": confidence_label(hs["n"] if hs else None),
+            "confidence": confidence_label(hs["n"] if hs else None, n_dates),
+            "signal_dates": n_dates,
             "expectancy": hs["expectancy"] if hs else None,
             "profit_factor": hs["profit_factor"] if hs else None,
             "max_drawdown": hs["max_drawdown"] if hs else None,
@@ -489,7 +523,8 @@ def sort_leaderboard(rows: List[Dict[str, Any]], sort: str) -> List[Dict[str, An
 async def leaderboard(sort: str = "composite", db: AsyncSession = Depends(get_session)):
     strats = await _all_strategies(db)
     runs = await _runs_for(db, [s.strategy_id for s in strats]) if strats else []
-    rows = leaderboard_rows(strats, runs)
+    rows = leaderboard_rows(strats, runs,
+                            await _dates_by_strategy(db, [s.strategy_id for s in strats]))
     # The composite is a rank-average computed across the whole field at the end
     # of a full backtest run.  Until that has happened every strategy carries
     # 0.0, and ranking by it would put an arbitrary — possibly losing —

@@ -53,7 +53,7 @@ const T = {
   invalidation: 'Invalidation — the condition that would prove the trade idea wrong. If it happens, the position is closed regardless of price.',
   hold: 'Intended holding period: scalp (minutes), intraday (closed before the bell) or swing (days).',
   stopmethod: 'How the initial stop is placed — ATR multiple, below the swing low, structural level, VWAP, standard deviation or trailing.',
-  n: 'n — the number of decided trades behind this number. Any statistic without its n is meaningless, so it is always shown.',
+  n: 'n — decided trades, then the number of separate sessions they happened on (e.g. "49 / 6d"). Twenty trades in one market-wide move are closer to one observation than twenty, so the confidence label is capped by the session count. Any statistic without its n is meaningless, so it is always shown.',
   confidence: 'Confidence label — derived from sample size: very low (<30 trades), low (30–99), moderate (100–499), high (500+). It is about how much to trust the statistics, not about profit.',
   return: 'Total return — cumulative percent result over the recorded period, after estimated costs, with the lab\'s fixed position sizing.',
   cohort: 'Cohort — which evidence bucket the trades come from: backtest, paper or live. They are never mixed.',
@@ -1569,7 +1569,13 @@ function Leaderboard({ strategies, onOpen }: { strategies: Any[]; onOpen: (s: An
                     <td className="l"><b>{r.name ?? sid(r)}</b> <span className="badge neutral" style={{ marginLeft: 6, fontSize: 9 }}>{label(r.family)}</span>
                       {small && <span className="badge warn" style={{ marginLeft: 6, fontSize: 9 }}>small sample</span>}</td>
                     <td className="l"><StagePill stage={String(r.stage ?? '')} /></td>
-                    <td className={small ? 'faint' : ''}>{fmtInt(n)}</td>
+                    <td className={small ? 'faint' : ''}>{fmtInt(n)}
+                      {num(r.signal_dates) !== null && (
+                        <span className="faint" style={{ marginLeft: 5 }}>
+                          / {fmtInt(num(r.signal_dates))}d
+                        </span>
+                      )}
+                    </td>
                     <td className="l"><ConfBadge label={confidenceLabel(r, n)} />{wl !== null && <span className="faint" style={{ fontSize: 10, marginLeft: 5 }}>LB {pctText(wl)}</span>}</td>
                     <td><b>{composedReady ? fmt(G.composite(m), 2) : <span className="faint">not scored yet</span>}</b></td>
                     <td className={tone(e.v)}>{fmtSigned(e.v, 2, e.unit)}</td>

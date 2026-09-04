@@ -400,3 +400,14 @@ def test_near_duplicate_triggers_share_a_family_so_the_ensemble_counts_them_once
     from app.lab.strategies import s04_gap_and_go_pm_high as s04
     from app.lab.strategies import s17_premarket_high_break as s17
     assert s04.META.family == s17.META.family == "session"
+
+
+def test_confidence_is_capped_by_independent_sessions_not_trade_count():
+    """Ten research probes died because hundreds of trades were a handful of
+    sessions.  A strategy with many trades on few dates must not read MODERATE."""
+    from app.routes.lab_api import confidence_label
+    assert confidence_label(400) == "MODERATE"            # no date info: unchanged
+    assert confidence_label(400, dates=200) == "MODERATE"  # genuinely spread out
+    assert confidence_label(400, dates=8) == "VERY LOW"    # 400 trades, 8 sessions
+    assert confidence_label(120, dates=12) == "LOW"
+    assert confidence_label(20, dates=20) == "VERY LOW"
