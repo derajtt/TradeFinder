@@ -392,3 +392,11 @@ def test_leaderboard_never_ranks_by_an_uncomputed_composite():
     assert 'r["composite"] = None' in src            # not a real zero score
     assert 'effective = "expectancy"' in src          # honest fallback
     assert '"composites_ready"' in src
+
+
+def test_near_duplicate_triggers_share_a_family_so_the_ensemble_counts_them_once():
+    """s04 and s17 fire on the same bar with the same geometry on gap days.
+    In different families the ensemble read that as two families agreeing."""
+    from app.lab.strategies import s04_gap_and_go_pm_high as s04
+    from app.lab.strategies import s17_premarket_high_break as s17
+    assert s04.META.family == s17.META.family == "session"

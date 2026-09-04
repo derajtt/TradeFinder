@@ -21,7 +21,11 @@ PM_OPEN, RTH_OPEN, FIRST_HOUR_END = 240, 570, 630          # minutes after 00:00
 META = StrategyMeta(
     id="s04_gap_and_go_pm_high",
     name="Gap-and-Go Premarket High Break",
-    family="momentum",
+    # Same trigger geometry as s17_premarket_high_break (first regular-session
+    # close above the premarket high, VWAP side, RVOL confirmed); the gap filter
+    # makes it a nested variant, not an independent idea.  Sharing s17's family
+    # keeps the ensemble from counting one signal as two agreeing families.
+    family="session",
     category="gap_continuation",
     hypothesis=" ".join(__doc__.split()),
     markets=["stocks", "etf"],
