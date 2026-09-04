@@ -376,3 +376,17 @@ def test_strategy_exception_is_recorded_not_raised():
 
     out = run(bars, boom, max_errors=3)
     assert out["trades"] == [] and len(out["errors"]) == 3 and out["counts"]["aborted"] == 1
+
+
+def test_zero_signals_on_regular_hours_only_data_is_not_called_a_gate_bug():
+    """s04 and s17 define their entry from the premarket high, and the cached
+    2024-2025 intraday history starts at 09:30, so they cannot fire there.
+    Reporting that as "audit the gates" points at a bug that does not exist."""
+    import inspect
+    from app.lab import backtest as B
+    src = inspect.getsource(B)
+    i = src.index('if loud:')
+    block = src[i:i + 1400]
+    assert 'premarket_bars' in block
+    assert 'not evidence about the strategy' in block
+    assert 'audit ' in block          # the real gate warning still exists

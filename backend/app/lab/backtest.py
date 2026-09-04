@@ -1119,7 +1119,22 @@ def _best_of(combos: Dict[str, Dict[str, Any]], stage: Optional[str] = None,
         if via:
             out["stage_reason"] = f"{stage} via {via}: {combos[via]['stage_reason']}; " + out["stage_reason"]
         if loud:
-            out["stage_reason"] += f"; zero signals ever on {loud} — audit the gates, not the thresholds"
+            # A strategy that needs bars the cached history does not contain
+            # cannot fire there, and telling the reader to audit the gates sends
+            # them after a bug that is not in the code.  Regular-hours-only
+            # history is the common case: 2024-2025 intraday bars start at 09:30.
+            no_pm = [k for k in loud
+                     if not any(c.get("premarket_bars")
+                                for c in combos[k].get("coverage") or [])]
+            if no_pm:
+                out["stage_reason"] += (
+                    f"; zero signals on {no_pm} — the cached history for those "
+                    "carries no premarket bars, so a premarket-dependent setup "
+                    "cannot occur; not evidence about the strategy")
+            rest = [k for k in loud if k not in no_pm]
+            if rest:
+                out["stage_reason"] += (f"; zero signals ever on {rest} — audit "
+                                        "the gates, not the thresholds")
             rth_only = all(not k.endswith("/1day") and all(cv.get("premarket_bars", 0) == 0 for cv in combos[k]["coverage"])
                            for k in loud)
             if rth_only:
