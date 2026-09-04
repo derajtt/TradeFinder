@@ -1314,11 +1314,22 @@ function Overview({ strategies, stages, regimes, regErr, loading, onOpen }: {
     for (const s of strategies) { const k = String(s.stage ?? 'RESEARCH'); c[k] = (c[k] ?? 0) + 1; }
     return c;
   }, [strategies, stages]);
-  const top = useMemo(() => strategies
-    .map((s) => ({ s, m: mx(s) }))
-    .filter((x) => G.composite(x.m) !== null && G.n(x.m) !== null)
-    .sort((a, b) => (G.composite(b.m) ?? -1e9) - (G.composite(a.m) ?? -1e9))
-    .slice(0, 5), [strategies]);
+  /* The composite is a rank-average over the whole field, produced at the end
+     of a full backtest run.  Until then every strategy carries 0/null, and
+     ranking by it would crown an arbitrary — possibly losing — strategy.  Fall
+     back to out-of-sample expectancy and say so. */
+  const composites = useMemo(
+    () => strategies.map((s) => G.composite(mx(s))).filter((c) => c !== null && c > 0),
+    [strategies]);
+  const scored = composites.length > 0;
+  const top = useMemo(() => {
+    const rows = strategies.map((s) => ({ s, m: mx(s) })).filter((x) => G.n(x.m) !== null);
+    const key = scored
+      ? (x: { m: Any }) => G.composite(x.m) ?? -1e9
+      : (x: { m: Any }) => G.expectancy(x.m).v ?? -1e9;
+    return rows.filter((x) => (scored ? G.composite(x.m) !== null : G.expectancy(x.m).v !== null))
+      .sort((a, b) => key(b) - key(a)).slice(0, 5);
+  }, [strategies, scored]);
   const byId = useMemo(() => Object.fromEntries(strategies.map((s) => [sid(s), s])), [strategies]);
   const total = strategies.length;
   const failed = counts.FAILED ?? 0;
@@ -1357,8 +1368,11 @@ function Overview({ strategies, stages, regimes, regErr, loading, onOpen }: {
         </div>
       )}
 
-      <div className="sect"><h2><L tip={T.composite}>Top 5 by composite</L></h2>
-        <span className="meta">composite excludes win rate on purpose · confidence reflects sample size, not profit</span></div>
+      <div className="sect">
+        <h2><L tip={T.composite}>{scored ? 'Top 5 by composite' : 'Top 5 by out-of-sample expectancy'}</L></h2>
+        <span className="meta">{scored
+          ? 'composite excludes win rate on purpose · confidence reflects sample size, not profit'
+          : 'composite scores need a completed run across the whole field · ranked by expectancy until then'}</span></div>
       {!top.length ? (
         <div className="tbl-wrap"><div className="empty"><b>No scored strategies yet</b>
           Composite scores appear once a strategy has a completed backtest run with decided trades.</div></div>
@@ -1379,7 +1393,7 @@ function Overview({ strategies, stages, regimes, regErr, loading, onOpen }: {
                     <td className="l faint">{i + 1}</td>
                     <td className="l"><b>{s.name ?? sid(s)}</b> <span className="badge neutral" style={{ marginLeft: 6, fontSize: 9 }}>{label(s.family)}</span></td>
                     <td className="l"><StagePill stage={String(s.stage ?? '')} /></td>
-                    <td><b>{fmt(G.composite(m), 2)}</b></td>
+                    <td><b>{scored ? fmt(G.composite(m), 2) : <span className="faint">not scored yet</span>}</b></td>
                     <td className={tone(e.v)}>{fmtSigned(e.v, 2, e.unit)}</td>
                     <td className={G.maxDD(m).v !== null ? 'neg' : ''}>{ddText(m)}</td>
                     <td className={n !== null && n < SMALL_N ? 'faint' : ''}>{fmtInt(n)}</td>
@@ -1484,6 +1498,11 @@ function Leaderboard({ strategies, onOpen }: { strategies: Any[]; onOpen: (s: An
     return [...strategies].sort((a, b) => (sortValue(b, sort) ?? -1e12) - (sortValue(a, sort) ?? -1e12));
   }, [serverRows, strategies, byId, sort]);
   const scale: Any | null = lb?.confidence_scale && typeof lb.confidence_scale === 'object' ? lb.confidence_scale : null;
+  // The server reports whether composites exist yet; before a full run they do
+  // not, and it ranks by expectancy instead rather than by a field of zeros.
+  const composedReady = lb?.composites_ready !== false;
+  const sortedBy = typeof lb?.sorted_by === 'string' ? lb.sorted_by : sort;
+  const lbNote = typeof lb?.note === 'string' ? lb.note : '';
   const th = (key: string, lbl: string, tip: string) => (
     <th key={key} onClick={() => setSort(key)} aria-sort={sort === key ? 'descending' : 'none'}
       style={sort === key ? { color: 'var(--accent)' } : undefined}>
@@ -1506,7 +1525,9 @@ function Leaderboard({ strategies, onOpen }: { strategies: Any[]; onOpen: (s: An
             Confidence scale: {Object.entries(scale).map(([k, v]) => `${k.toLowerCase()} = ${String(v)} trades`).join(' · ')}
           </p>
         )}
-        {lbErr && !serverRows.length && <p className="faint" style={{ fontSize: 11.5 }}>Leaderboard endpoint unavailable ({lbErr.message}) — ranking the strategy list locally.</p>}
+        {lbNote && <p className="faint" style={{ fontSize: 12 }}>{lbNote}</p>}
+        {!lbNote && sortedBy !== sort && <p className="faint" style={{ fontSize: 12 }}>Ranked by {label(sortedBy)}.</p>}
+        {lbErr && !serverRows.length && <p className="faint" style={{ fontSize: 12 }}>Leaderboard endpoint unavailable ({lbErr.message}) — ranking the strategy list locally.</p>}
       </div>
       <div className="row" style={{ gap: 6, marginBottom: 10 }}>
         <span className="faint" style={{ fontSize: 11.5, marginRight: 4 }}>Sort by</span>
@@ -1550,7 +1571,7 @@ function Leaderboard({ strategies, onOpen }: { strategies: Any[]; onOpen: (s: An
                     <td className="l"><StagePill stage={String(r.stage ?? '')} /></td>
                     <td className={small ? 'faint' : ''}>{fmtInt(n)}</td>
                     <td className="l"><ConfBadge label={confidenceLabel(r, n)} />{wl !== null && <span className="faint" style={{ fontSize: 10, marginLeft: 5 }}>LB {pctText(wl)}</span>}</td>
-                    <td><b>{fmt(G.composite(m), 2)}</b></td>
+                    <td><b>{composedReady ? fmt(G.composite(m), 2) : <span className="faint">not scored yet</span>}</b></td>
                     <td className={tone(e.v)}>{fmtSigned(e.v, 2, e.unit)}</td>
                     <td>{fmt(G.pf(m))}</td>
                     <td className={G.maxDD(m).v !== null ? 'neg' : ''}>{ddText(m)}</td>

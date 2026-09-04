@@ -380,3 +380,15 @@ async def test_router_mounted_under_api_lab(db):
             assert r.status_code == 200 and r.json()["stage"] == "FAILED"
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+def test_leaderboard_never_ranks_by_an_uncomputed_composite():
+    """Composite is a rank-average across the whole field; before a full run it
+    is 0.0 for everyone, and ranking by it put a strategy with -0.62R
+    expectancy at number one."""
+    import inspect
+    from app.routes import lab_api
+    src = inspect.getsource(lab_api.leaderboard)
+    assert 'r["composite"] = None' in src            # not a real zero score
+    assert 'effective = "expectancy"' in src          # honest fallback
+    assert '"composites_ready"' in src

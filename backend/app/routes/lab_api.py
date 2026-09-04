@@ -489,10 +489,28 @@ def sort_leaderboard(rows: List[Dict[str, Any]], sort: str) -> List[Dict[str, An
 async def leaderboard(sort: str = "composite", db: AsyncSession = Depends(get_session)):
     strats = await _all_strategies(db)
     runs = await _runs_for(db, [s.strategy_id for s in strats]) if strats else []
-    rows = sort_leaderboard(leaderboard_rows(strats, runs), sort)
+    rows = leaderboard_rows(strats, runs)
+    # The composite is a rank-average computed across the whole field at the end
+    # of a full backtest run.  Until that has happened every strategy carries
+    # 0.0, and ranking by it would put an arbitrary — possibly losing —
+    # strategy first while looking authoritative.
+    scored = [r for r in rows if (r.get("composite") or 0.0) > 0.0]
+    note = ""
+    effective = sort
+    if not scored:
+        for r in rows:
+            r["composite"] = None
+        if sort == "composite":
+            effective = "expectancy"
+            note = ("Composite scores are not computed yet — they need a "
+                    "completed run across the whole field.  Ranked by "
+                    "out-of-sample expectancy instead.")
+    rows = sort_leaderboard(rows, effective)
     for i, r in enumerate(rows, 1):
         r["rank"] = i
-    return {"sort": sort, "sort_keys": SORT_KEYS, "rows": rows,
+    return {"sort": sort, "sorted_by": effective, "note": note,
+            "composites_ready": bool(scored),
+            "sort_keys": SORT_KEYS, "rows": rows,
             "confidence_scale": {"VERY LOW": "<30 trades", "LOW": "30-99",
                                  "MODERATE": "100-499", "HIGH": "500+"}}
 
