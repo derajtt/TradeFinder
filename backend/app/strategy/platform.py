@@ -330,9 +330,17 @@ class ModelContext:
 log = logging.getLogger(__name__)
 
 MIN_RISK_FRAC = 0.0015
-# Day-trading stop distance as a multiple of ATR(5m), per engine.
-ATR_STOP_MULT_DEFAULT = 2.0
+# Day-trading geometry. Stop = max(mult * ATR(5m), floor * price) capped at
+# DAY_STOP_CAP; target1 = t1_r * stop distance (50% off, stop to breakeven),
+# target2 = 2 * t1_r. Per-engine overrides come from the sweep
+# (scripts/engine_sweep.py) and may set any of mult/floor/t1_r; an engine
+# mapped to None keeps its own levels entirely.
+ATR_STOP_MULT_DEFAULT = 3.0
+DAY_STOP_FLOOR = 0.04
+DAY_STOP_CAP = 0.06
+DAY_T1_R = 3.0
 ATR_STOP_MULT = {"exp_rs_reclaim": None}   # None = keep the engine's own stop
+DAY_GEOM_OVERRIDE: Dict[str, Dict[str, float]] = {"breakout_finder": {"mult": 2.0, "floor": 0.02, "t1_r": 3.0}}
 INSIDER_DOC_FETCH_CAP = 120
 # pacing between EDGAR document fetches: ~8/s, under SEC's 10/s ceiling
 SEC_FETCH_GAP_S = 0.13
@@ -424,17 +432,17 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
             # Confluence -0.81 -> +0.07, Opening Drive -0.59 -> +0.11. RS
             # Reclaim is the exception — wider stops made it WORSE (-0.24 ->
             # -0.55): its losers keep falling, so it stays tight.
-            mult = ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT)
-            # Floor 2% of price: a 1% floor let ATR on a \$2 mover produce
-            # sub-1% stops — TIGHTER than the engines' own 2% — and with
-            # settlement now seeing every intrabar wick that was a stop-out
-            # machine (299 trades, 91% stopped, -0.86R; 52% of the stop-outs had
-            # already reached +1R). Today by stop width: <1% -1.12R, 1-2% -0.98,
-            # 2-3% -0.65, 3-5% +0.06 (the only positive band), 5%+ -0.34.
-            r_vol = min(max(mult * atr5, fill * 0.03), fill * 0.06)
+            ov = DAY_GEOM_OVERRIDE.get(model_id, {})
+            mult = ov.get("mult", ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT))
+            floor_ = ov.get("floor", DAY_STOP_FLOOR)
+            t1r = ov.get("t1_r", DAY_T1_R)
+            # Floor matters more than the multiple: sub-1% stops on movers
+            # were a stop-out machine (91% stopped, 52% of them after reaching
+            # +1R); 3-5% was the only positive band on Sep 3.
+            r_vol = min(max(mult * atr5, fill * floor_), fill * DAY_STOP_CAP)
             stop_ = round(fill - r_vol, 4)
-            t1_ = round(fill + 1.5 * r_vol, 4)
-            t2_ = round(fill + 3.0 * r_vol, 4)
+            t1_ = round(fill + t1r * r_vol, 4)
+            t2_ = round(fill + 2 * t1r * r_vol, 4)
             verdict = {**verdict, "stop": stop_, "target1": t1_, "target2": t2_,
                        "geometry": "day_atr", "atr_5m": atr5}
         min_risk = fill * MIN_RISK_FRAC

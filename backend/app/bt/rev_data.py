@@ -103,14 +103,19 @@ class RevData:
         return out
 
     async def bars(self, symbol: str, interval: str, start: str,
-                   end: str) -> List[dict]:
-        """Ascending closed bars in [start, end]. Cached windows are never refetched."""
-        blob = self._load(symbol, interval)
+                   end: str, extended: bool = False) -> List[dict]:
+        """Ascending closed bars in [start, end]. Cached windows are never refetched.
+        `extended` includes pre/post-market for intraday intervals (own cache key)."""
+        cache_iv = f"{interval}_ext" if (extended and interval != "1day") else interval
+        blob = self._load(symbol, cache_iv)
         bars: Dict[str, dict] = blob.get("bars", {})
         done = set(blob.get("windows", []))
 
         if interval == "1day":
-            tag = "eod"
+            # Tag by range: a bare "eod" tag made an older cached history look
+            # complete, so a later request for newer dates silently returned
+            # the stale slice (empty) instead of fetching.
+            tag = f"eod:{start}:{end}"
             if tag not in done:
                 j = await self._get("historical-price-eod/full",
                                     {"symbol": symbol, "from": start, "to": end})
@@ -137,8 +142,10 @@ class RevData:
                     self.cache_hits += 1
                     cur = nxt + timedelta(days=1)
                     continue
-                j = await self._get(f"historical-chart/{interval}",
-                                    {"symbol": symbol, "from": str(cur), "to": str(nxt)})
+                params = {"symbol": symbol, "from": str(cur), "to": str(nxt)}
+                if extended:
+                    params["extended"] = "true"
+                j = await self._get(f"historical-chart/{interval}", params)
                 if isinstance(j, dict) and j.get("__error__"):
                     return []
                 if isinstance(j, list):
@@ -148,7 +155,7 @@ class RevData:
                     dirty = True
                 cur = nxt + timedelta(days=1)
             if dirty:
-                self._save(symbol, interval, {"bars": bars, "windows": sorted(done)})
+                self._save(symbol, cache_iv, {"bars": bars, "windows": sorted(done)})
 
         rows = sorted(bars.values(), key=lambda b: b["time"])
         lo = datetime.strptime(start, "%Y-%m-%d").timestamp()
