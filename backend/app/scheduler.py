@@ -16,7 +16,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .db import SessionLocal
 from .models import (AlertRule, BuySignal, Candidate, CandidateFeatureSnapshot,
@@ -95,8 +95,14 @@ class Scheduler:
     def start(self):
         self.running = True
         self.task = asyncio.create_task(self._loop())
+        # market-wide live filings feed + the 8-K Reactor run on their own
+        # fast loop so a filing is acted on within seconds, not on the 30s tick
+        self._feed_task = asyncio.create_task(self._live_filings_loop())
 
     async def stop(self):
+        ft = getattr(self, "_feed_task", None)
+        if ft:
+            ft.cancel()
         self.running = False
         if self.task:
             self.task.cancel()
@@ -152,6 +158,183 @@ class Scheduler:
                 "symbols_scanned": 0, "symbols_with_data": 0,
                 "errors": 0, "signals_today": 0,
             })
+
+    async def _live_filings_loop(self):
+        """Poll EDGAR's newest-filings feed every ~20s. New 8-Ks are stored,
+        broadcast to the UI, and handed to the 8-K Reactor. Never sleeps on the
+        scheduler's tick: filings arrive at any time until ~22:00 ET."""
+        from .providers.sec import LiveFilings
+        from .models import SecFiling
+        from .bt.data import BtData
+        from .config import get_config
+        await asyncio.sleep(5)
+        feed = LiveFilings(get_config().sec_user_agent)
+        cmap: Dict[str, str] = {}
+        cmap_at = 0.0
+        hb = self.model_health.setdefault("eightk_reactor", {})
+        hb.update({"model_id": "eightk_reactor", "name": "8-K Reactor",
+                   "engine": "eightk", "enabled": True, "cadence": "afterhours"})
+        while self.running:
+            try:
+                async with SessionLocal() as db:
+                    settings = await get_settings(db)
+                if str(settings.get("sec_live_feed", "on")).lower() == "off":
+                    hb.update({"status": "DISABLED", "skip_reason": "sec_live_feed=off",
+                               "last_seen_at": now_utc().isoformat()})
+                    await asyncio.sleep(30); continue
+                if _time.monotonic() - cmap_at > 6 * 3600 or not cmap:
+                    try:
+                        cmap = await BtData(SessionLocal).cik_ticker_map()
+                        cmap_at = _time.monotonic()
+                    except Exception as e:
+                        log.warning("cik map refresh failed: %s", e)
+                rows = await feed.latest("8-K", 100)
+                new_rows = []
+                if rows:
+                    async with SessionLocal() as db:
+                        for r in rows:
+                            key = r["accession"]
+                            if key in feed.seen:
+                                continue
+                            sym = cmap.get(r["cik"]) or cmap.get(r["cik"].zfill(10))
+                            feed.seen.add(key)
+                            if not sym:
+                                continue          # no ticker -> not tradeable, not shown
+                            exists = (await db.execute(select(SecFiling.id).where(
+                                SecFiling.accession == key, SecFiling.symbol == sym))).first()
+                            if exists:
+                                continue
+                            items = await feed.items_for(r["index_url"])
+                            row = SecFiling(symbol=sym, cik=r["cik"], accession=key,
+                                            form_type=r["form_type"],
+                                            filed_at=r["accepted_at"], accepted_at=r["accepted_at"],
+                                            items=items, title=f"{r['form_type']} — {r['company']}"[:500],
+                                            primary_doc_url=r["index_url"])
+                            db.add(row); new_rows.append(row)
+                        if new_rows:
+                            await db.commit()
+                    for row in new_rows:
+                        await broadcaster.publish("filing", {
+                            "symbol": row.symbol, "form": row.form_type, "items": row.items,
+                            "accepted_at": row.accepted_at.isoformat() if row.accepted_at else None,
+                            "url": row.primary_doc_url, "title": row.title})
+                self.state["live_feed"] = {"last_ok_at": now_utc().isoformat() if feed.last_ok_at else None,
+                                           "error": feed.last_error, "new": len(new_rows),
+                                           "seen": len(feed.seen)}
+                fired = await self._eightk_react(new_rows, settings, hb)
+                await self._eightk_manage(settings)
+                hb.update({"status": "PAPER_LIVE", "skip_reason": None,
+                           "last_scan_at": now_utc().isoformat(),
+                           "last_seen_at": now_utc().isoformat(),
+                           "symbols_scanned": hb.get("symbols_scanned", 0) + len(new_rows),
+                           "symbols_with_data": hb.get("symbols_with_data", 0) + len(new_rows),
+                           "errors": 0, "signals_this_pass": fired,
+                           "signals_today": (hb.get("signals_today", 0) + fired
+                                             if hb.get("day") == str(now_et().date()) else fired),
+                           "day": str(now_et().date()),
+                           "feed": self.state["live_feed"]})
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.error("live filings loop: %s\n%s", e, traceback.format_exc(limit=3))
+                hb.update({"status": "ERROR", "skip_reason": f"{type(e).__name__}: {e}"[:200],
+                           "errors": hb.get("errors", 0) + 1, "last_seen_at": now_utc().isoformat()})
+            await asyncio.sleep(max(10, int(settings.get("sec_live_feed_interval_s") or 20)))
+        await feed.close()
+
+    def _in_window(self, settings, start_key, end_key, default_start, default_end):
+        t = now_et(); m = t.hour * 60 + t.minute
+        try:
+            sh, sm = (int(x) for x in str(settings.get(start_key) or default_start).split(":"))
+            eh, em = (int(x) for x in str(settings.get(end_key) or default_end).split(":"))
+        except (ValueError, TypeError):
+            return False
+        return sh * 60 + sm <= m < eh * 60 + em
+
+    async def _eightk_react(self, new_rows, settings, hb) -> int:
+        """Buy the filer of each new 8-K inside the window, with a tight stop.
+        Exits are managed by the momentum branch in settle_positions."""
+        if not new_rows:
+            return 0
+        if not self._in_window(settings, "eightk_window_start_et", "eightk_window_end_et",
+                               "15:30", "20:00"):
+            hb["window_rejects"] = hb.get("window_rejects", 0) + len(new_rows)
+            return 0
+        from .models import PaperPosition
+        skip = {x.strip() for x in str(settings.get("eightk_skip_items") or "").split(",") if x.strip()}
+        cap = int(settings.get("eightk_max_positions") or 8)
+        min_px = float(settings.get("eightk_min_price") or 0.5)
+        max_spread = float(settings.get("eightk_max_spread_pct") or 5.0)
+        stop_pct = float(settings.get("eightk_stop_pct") or 3.0) / 100.0
+        today = str(now_et().date())
+        async with SessionLocal() as db:
+            open_n = (await db.execute(select(func.count(PaperPosition.id)).where(
+                PaperPosition.profile == "eightk_reactor",
+                PaperPosition.status == "open"))).scalar() or 0
+        fired = 0
+        for row in new_rows:
+            if open_n + fired >= cap:
+                hb["cap_rejects"] = hb.get("cap_rejects", 0) + 1
+                break
+            items = {x for x in (row.items or "").split(",") if x}
+            if items & skip:
+                hb["item_rejects"] = hb.get("item_rejects", 0) + 1
+                continue
+            try:
+                amt = await self.ctx.fmp.aftermarket_trade(row.symbol)
+                amq = await self.ctx.fmp.aftermarket_quote(row.symbol)
+            except Exception:
+                amt, amq = None, None
+            px = (amt or {}).get("price") or (amq or {}).get("price")
+            bid, ask = (amq or {}).get("bid"), (amq or {}).get("ask")
+            if not px or px < min_px:
+                hb["quote_rejects"] = hb.get("quote_rejects", 0) + 1
+                continue
+            if bid and ask and bid > 0 and (ask - bid) / ((ask + bid) / 2) * 100 > max_spread:
+                hb["spread_rejects"] = hb.get("spread_rejects", 0) + 1
+                continue
+            entry = float(ask or px)
+            v = {"action": "buy", "entry": entry, "stop": round(entry * (1 - stop_pct), 4),
+                 "target1": round(entry * 1.25, 4), "target2": round(entry * 1.50, 4),
+                 "score": 60.0, "setup": "eightk_filing_reaction",
+                 "evidence": {"accession": row.accession, "form": row.form_type,
+                              "items": row.items, "filed_at": row.accepted_at.isoformat() if row.accepted_at else None,
+                              "ah_bid": bid, "ah_ask": ask, "ah_last": px, "url": row.primary_doc_url},
+                 "holding": "afterhours", "atr_5m": None}
+            sig = await mplat.record_model_signal("eightk_reactor", row.symbol, v, px, today, settings)
+            if sig:
+                fired += 1
+                await broadcaster.publish("buy_signal", {
+                    "symbol": row.symbol, "price": entry, "type": "buy", "model": "eightk_reactor",
+                    "score": 60.0, "signal_uid": sig.signal_uid,
+                    "initiated_at": sig.initiated_at.isoformat()})
+                await self._health("info", "eightk", f"BUY {row.symbol} on 8-K {row.items or ''} @ {entry}")
+        return fired
+
+    async def _eightk_manage(self, settings):
+        """Fast exit management for open 8-K Reactor positions using after-hours
+        prints, independent of the slower tracking cycle."""
+        from .models import PaperPosition
+        async with SessionLocal() as db:
+            open_pos = (await db.execute(select(PaperPosition).where(
+                PaperPosition.profile == "eightk_reactor",
+                PaperPosition.status == "open"))).scalars().all()
+            if not open_pos:
+                return
+            quotes = {}
+            for p_ in open_pos:
+                try:
+                    amt = await self.ctx.fmp.aftermarket_trade(p_.symbol)
+                    amq = await self.ctx.fmp.aftermarket_quote(p_.symbol)
+                except Exception:
+                    continue
+                px = (amt or {}).get("price") or (amq or {}).get("price")
+                if px:
+                    quotes[p_.symbol] = {"price": px, "bid": (amq or {}).get("bid"),
+                                         "ask": (amq or {}).get("ask"),
+                                         "volume": (amq or {}).get("volume") or (amt or {}).get("volume")}
+            if quotes:
+                await mplat.settle_positions(db, quotes, settings)
 
     def _touch_heartbeats(self, phase: str):
         """Liveness ping for every registry model, once per cycle.

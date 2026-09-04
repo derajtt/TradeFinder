@@ -203,6 +203,22 @@ MODELS["custom_strategy_3"] = {
                   "Small sample; treat as an experiment until it has 30+ trades.",
 }
 
+MODELS["eightk_reactor"] = {
+    "name": "8-K Reactor", "engine": "eightk", "build": True,
+    "asset_classes": ["stocks"], "cadence": "afterhours",
+    "horizon": "minutes–hours (after hours)", "color": "#fb923c", "own_worker": True,
+    "risk_model": "standard",
+    "edge": "Buys any company that files an 8-K from 30 minutes before the close "
+            "through the after-hours session, with a tight stop and a momentum "
+            "exit that stays in while price makes new highs and takes profit "
+            "when it retraces into resistance",
+    "universe": "any 8-K filer with an executable after-hours quote (15:30–20:00 ET)",
+    "data_notes": "Feed: EDGAR getcurrent, polled every ~20s. Item codes are read "
+                  "from each filing index; bankruptcy (1.03), delisting (3.01) and "
+                  "auditor-change (4.01) filings are skipped. After-hours liquidity "
+                  "is thin — fills are simulated at the ask.",
+}
+
 # Which risk model governs each strategy. "standard" routes through the platform
 # risk layer (stop-derived sizing, R:R gate, portfolio ceilings). "scalper" and
 # "WINGED" keep their own tested execution rules; the layer still renders their

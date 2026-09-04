@@ -1168,7 +1168,7 @@ async def feed(form: str = "", symbol: str = "", limit: int = 80,
     items = ([{"kind": "news", "symbol": n.symbol, "ts": n.published_at.isoformat()
                if n.published_at else None, "title": n.headline,
                "source": n.source, "url": n.url} for n in news] +
-             [{"kind": "filing", "symbol": f.symbol,
+             [{"kind": "filing", "symbol": f.symbol, "items": f.items or "",
                "ts": f.accepted_at.isoformat() if f.accepted_at else None,
                "title": f"{f.form_type} — {f.title or 'filing'}",
                "source": "SEC EDGAR", "url": f.primary_doc_url,

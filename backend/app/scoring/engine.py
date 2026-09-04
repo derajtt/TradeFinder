@@ -36,6 +36,17 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "movers_cap": 35,
     # Crypto day-trades ran -1.17R at a 14% win rate; off unless enabled.
     "day_trade_crypto": "off",
+    # ── live SEC feed + 8-K Reactor
+    "sec_live_feed": "on",
+    "sec_live_feed_interval_s": 20,
+    "eightk_window_start_et": "15:30",
+    "eightk_window_end_et": "20:00",
+    "eightk_stop_pct": 3.0,          # initial stop, a little under the fill
+    "eightk_trail_pct": 4.0,         # trailing stop from the running high
+    "eightk_max_positions": 8,       # per session
+    "eightk_skip_items": "1.03,3.01,4.01",
+    "eightk_min_price": 0.5,
+    "eightk_max_spread_pct": 5.0,
     # No NEW model entries after this ET time. First session of data: entries
     # at 10:00 averaged +0.29R over 76 trades; 14:00 averaged -0.62R, and a
     # 15:55 flatten leaves too little room for a late trade to work.

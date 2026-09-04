@@ -563,6 +563,45 @@ async def settle_positions(db, quotes: Dict[str, dict],
             return fillp * frac * (pos.size_usd / pos.entry_fill)
 
         credited = 0.0
+        if pos.profile == "eightk_reactor":
+            # Momentum exit. Stays in while price keeps making highs; the stop
+            # only ever ratchets UP (trail from the running high); takes
+            # profit on a retrace into resistance (three lower marks on falling
+            # volume). Flattens before the after-hours close, never at 15:55.
+            trail = float(settings.get("eightk_trail_pct", 4.0)) / 100.0
+            peak = max([e.get("peak", 0) for e in ev if e.get("e") == "mark"] + [pos.entry_fill, px_hi])
+            marks = [e for e in ev if e.get("e") == "mark"][-5:]
+            vol_now = float(q.get("volume") or 0)
+            ev = [e for e in ev if e.get("e") != "mark"] + marks + [
+                {"e": "mark", "t": now_utc().isoformat(), "px": px, "peak": peak, "vol": vol_now}]
+            trail_stop = round(peak * (1 - trail), 4)
+            if trail_stop > (pos.stop or 0):
+                pos.stop = trail_stop                    # ratchets up only
+            recent = [m for m in marks[-3:]]
+            fading = (len(recent) == 3 and px > pos.entry_fill * 1.02
+                      and all(recent[k]["px"] <= recent[k - 1]["px"] for k in (1, 2))
+                      and px < recent[-1]["px"]
+                      and (recent[-1].get("vol") or 0) <= (recent[0].get("vol") or 1))
+            bid = q.get("bid") or px
+            if px_lo <= pos.stop:
+                credited += close(min(pos.stop, bid), "trail_stop" if pos.stop > pos.entry_fill else "stop",
+                                  pos.remaining_frac)
+            elif fading:
+                credited += close(bid, "momentum_fade", pos.remaining_frac)
+            elif m_now >= 19 * 60 + 55:
+                credited += close(bid, "ah_time_exit", pos.remaining_frac)
+            if credited or pos.status == "closed":
+                acc = await get_account(db, pos.profile)
+                acc.cash = round(acc.cash + credited, 2)
+                acc.realized_pnl = round(acc.realized_pnl + pnl_delta, 2)
+                if pos.status == "closed":
+                    acc.trades_closed += 1
+                    if pos.realized_r > 0.05:
+                        acc.wins += 1
+            pos.events = ev
+            out.append({"model": pos.profile, "symbol": pos.symbol,
+                        "status": pos.status, "r": pos.realized_r})
+            continue
         hit_stop = bool(pos.stop and px_lo <= pos.stop)
         took1 = any(e.get("e") == "target1_partial" for e in ev)
         hit_t1 = bool(pos.target1 and px_hi >= pos.target1 and not took1)

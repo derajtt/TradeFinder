@@ -486,3 +486,38 @@ def test_custom_confluence_strategies_are_registered_and_dispatched():
     assert sched.ENGINE_ENTRY_HOURS["exp_rs_reclaim"] == {10}
     cyc = inspect.getsource(sched.Scheduler._models_cycle)
     assert "await self._custom_confluence_pass(" in cyc
+
+
+def test_getcurrent_atom_parser():
+    from app.providers.sec import parse_getcurrent_atom
+    xml = """<feed><entry><title>8-K - Acme Corp (0001234567) (Filer)</title>
+      <link rel="alternate" type="text/html" href="https://www.sec.gov/Archives/edgar/data/1234567/000123456726000045/0001234567-26-000045-index.htm"/>
+      <summary type="html">&lt;b&gt;Filed:&lt;/b&gt; 2026-09-03 &lt;b&gt;AccNo:&lt;/b&gt; 0001234567-26-000045 &lt;b&gt;Size:&lt;/b&gt; 120 KB</summary>
+      <updated>2026-09-03T17:02:11-04:00</updated></entry></feed>"""
+    rows = parse_getcurrent_atom(xml)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["form_type"] == "8-K" and r["cik"] == "1234567" and r["accession"] == "0001234567-26-000045"
+    assert r["company"] == "Acme Corp" and r["index_url"].endswith("-index.htm")
+    assert r["accepted_at"].hour == 17
+
+
+def test_eightk_reactor_wiring_and_exit_rules():
+    import inspect
+    from app.strategy.registry import MODELS
+    from app import scheduler as sched
+    from app.strategy import platform as plat
+    from app.scoring.engine import DEFAULT_SETTINGS
+    m = MODELS["eightk_reactor"]
+    assert m["own_worker"] and m["cadence"] == "afterhours"
+    src = inspect.getsource(sched)
+    assert "_live_filings_loop" in src and 'self._feed_task = asyncio.create_task(self._live_filings_loop())' in src
+    assert "_eightk_react" in src and "_eightk_manage" in src
+    settle = inspect.getsource(plat.settle_positions)
+    branch = settle[settle.index('if pos.profile == "eightk_reactor":'):settle.index('hit_stop = bool(pos.stop and px_lo <= pos.stop)')]
+    assert "if trail_stop > (pos.stop or 0):" in branch          # stop only ratchets up
+    assert '"momentum_fade"' in branch and '"ah_time_exit"' in branch
+    assert "19 * 60 + 55" in branch                              # flattens before AH close
+    assert "eod_time_exit" not in branch                         # never the 15:55 flatten
+    for k in ("sec_live_feed", "eightk_window_start_et", "eightk_stop_pct", "eightk_trail_pct", "eightk_skip_items"):
+        assert k in DEFAULT_SETTINGS

@@ -117,3 +117,83 @@ class SecProvider:
             return datetime.fromisoformat(str(v)).replace(tzinfo=timezone.utc)
         except ValueError:
             return None
+
+
+# ── live filings feed ────────────────────────────────────────────────────────
+import asyncio as _asyncio
+import re as _re
+import httpx as _httpx
+
+_ATOM_ENTRY = _re.compile(r"<entry>(.*?)</entry>", _re.S)
+_ATOM_TITLE = _re.compile(r"<title>\s*([^<]+?)\s*</title>")
+_ATOM_LINK = _re.compile(r'<link[^>]*href="([^"]+)"')
+_ATOM_UPDATED = _re.compile(r"<updated>([^<]+)</updated>")
+_ACCNO = _re.compile(r"(\d{10}-\d{2}-\d{6})")
+_TITLE_PARTS = _re.compile(r"^\s*([^\s-]+(?:/A)?)\s*-\s*(.*?)\s*\((\d{10})\)")
+_ITEM = _re.compile(r"Item\s+(\d\.\d\d)")
+
+
+def parse_getcurrent_atom(xml: str) -> List[dict]:
+    """Parse EDGAR's getcurrent Atom feed. Pure regex — the feed is small and
+    regular, and this avoids a parser dependency in the hot loop."""
+    out = []
+    for m in _ATOM_ENTRY.finditer(xml or ""):
+        body = m.group(1)
+        t = _ATOM_TITLE.search(body); l = _ATOM_LINK.search(body); u = _ATOM_UPDATED.search(body)
+        acc = _ACCNO.search(body)
+        if not (t and l and acc):
+            continue
+        parts = _TITLE_PARTS.match(t.group(1).replace("&amp;", "&"))
+        if not parts:
+            continue
+        form, name, cik = parts.group(1), parts.group(2), parts.group(3)
+        try:
+            accepted = datetime.fromisoformat(u.group(1).replace("Z", "+00:00")) if u else None
+        except ValueError:
+            accepted = None
+        out.append({"form_type": form, "company": name, "cik": cik.lstrip("0") or "0",
+                    "accession": acc.group(1), "index_url": l.group(1), "accepted_at": accepted})
+    return out
+
+
+class LiveFilings:
+    """Market-wide newest filings from EDGAR (updates about once a minute at
+    the source). Paced well under SEC's 10 req/s; one call per poll plus one
+    small index fetch per NEW 8-K to read its Item codes."""
+
+    def __init__(self, ua: str):
+        self.ua = ua
+        self.client = _httpx.AsyncClient(timeout=20, headers={"User-Agent": ua,
+                                                                 "Accept-Encoding": "gzip, deflate"})
+        self.seen: set = set()
+        self.last_ok_at: float = 0.0
+        self.last_error: str = ""
+
+    async def close(self):
+        await self.client.aclose()
+
+    async def latest(self, form_type: str = "8-K", count: int = 100) -> List[dict]:
+        url = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent"
+               f"&type={form_type}&company=&dateb=&owner=include&count={count}&output=atom")
+        try:
+            r = await self.client.get(url)
+            if r.status_code != 200:
+                self.last_error = f"HTTP {r.status_code}"
+                return []
+            self.last_ok_at = _time.monotonic(); self.last_error = ""
+            return parse_getcurrent_atom(r.text)
+        except _httpx.HTTPError as e:
+            self.last_error = type(e).__name__
+            return []
+
+    async def items_for(self, index_url: str) -> str:
+        """Item codes from the filing index page, e.g. '2.02,9.01'."""
+        try:
+            await _asyncio.sleep(0.15)
+            r = await self.client.get(index_url)
+            if r.status_code != 200:
+                return ""
+            found = sorted(set(_ITEM.findall(r.text)))
+            return ",".join(found)
+        except _httpx.HTTPError:
+            return ""
