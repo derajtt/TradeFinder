@@ -58,9 +58,27 @@ async def do_export(path):
     print("exported " + ", ".join(f"{k}={len(v)}" for k, v in out.items()) + f" -> {path}")
 
 
+# Static metadata belongs to the module, results belong to the run.  A family
+# corrected in code after a backtest (s04 moved to "session") would otherwise
+# stay wrong in the database until a full re-run.
+META_FIELDS = ("name", "family", "category", "hypothesis", "markets",
+               "timeframes", "hold", "stop_method", "params", "version")
+
+
+def _meta_from_code():
+    try:
+        from app.lab.registry import load_all
+        return {sid: meta for sid, (meta, _) in load_all().items()}
+    except Exception as exc:                       # never block an import
+        print(f"note: could not read strategy modules ({type(exc).__name__}); "
+              "metadata comes from the dump")
+        return {}
+
+
 async def do_import(path):
     with open(path) as fh:
         data = json.load(fh)
+    code_meta = _meta_from_code()
     strat_ids = sorted({r["strategy_id"] for r in data.get("lab_strategies", [])})
     async with SessionLocal() as db:
         # replace runs/trades for the strategies present in the dump
@@ -73,6 +91,12 @@ async def do_import(path):
             for c in _cols(LabStrategy):
                 if c in row:
                     setattr(obj, c, _dec(LabStrategy, c, row[c]))
+            meta = code_meta.get(row["strategy_id"])
+            if meta is not None:
+                for f in META_FIELDS:
+                    v = getattr(meta, f, None)
+                    if v is not None and getattr(obj, f, None) != v:
+                        setattr(obj, f, v)
             if obj not in existing.values():
                 db.add(obj)
         for model in (LabRun, LabTrade):
