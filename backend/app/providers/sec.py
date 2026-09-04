@@ -129,7 +129,7 @@ _ATOM_TITLE = _re.compile(r"<title>\s*([^<]+?)\s*</title>")
 _ATOM_LINK = _re.compile(r'<link[^>]*href="([^"]+)"')
 _ATOM_UPDATED = _re.compile(r"<updated>([^<]+)</updated>")
 _ACCNO = _re.compile(r"(\d{10}-\d{2}-\d{6})")
-_TITLE_PARTS = _re.compile(r"^\s*([^\s-]+(?:/A)?)\s*-\s*(.*?)\s*\((\d{10})\)")
+_TITLE_PARTS = _re.compile(r"^\s*(.+?)\s+-\s+(.*?)\s*\((\d{10})\)")   # "8-K - Acme Corp (0001234567) (Filer)"
 _ITEM = _re.compile(r"Item\s+(\d\.\d\d)")
 
 

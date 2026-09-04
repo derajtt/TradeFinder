@@ -640,3 +640,99 @@ class StrategyChangeLog(Base):
     new_parameters: Mapped[dict] = mapped_column(JSON, default=dict)
     dataset_action: Mapped[str] = mapped_column(String(32), default="continue")
     actor: Mapped[str] = mapped_column(String(48), default="system")
+
+
+# ── Quant Lab ────────────────────────────────────────────────────────────────
+
+class LabStrategy(Base):
+    """One independently researched strategy and its lifecycle stage. The
+    hypothesis is stored so a strategy can never be judged without the claim
+    it was built on sitting next to its results."""
+    __tablename__ = "lab_strategies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(96))
+    family: Mapped[str] = mapped_column(String(32), index=True)
+    category: Mapped[str] = mapped_column(String(48), default="")
+    hypothesis: Mapped[str] = mapped_column(Text, default="")
+    markets: Mapped[list] = mapped_column(JSON, default=list)
+    timeframes: Mapped[list] = mapped_column(JSON, default=list)
+    hold: Mapped[str] = mapped_column(String(24), default="intraday")
+    stop_method: Mapped[str] = mapped_column(String(48), default="atr")
+    stage: Mapped[str] = mapped_column(String(24), default="RESEARCH", index=True)
+    stage_reason: Mapped[str] = mapped_column(Text, default="")
+    optimization_count: Mapped[int] = mapped_column(Integer, default=0)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    best_market: Mapped[str] = mapped_column(String(16), default="")
+    best_timeframe: Mapped[str] = mapped_column(String(8), default="")
+    best_regime: Mapped[str] = mapped_column(String(24), default="")
+    worst_regime: Mapped[str] = mapped_column(String(24), default="")
+    composite_score: Mapped[float] = mapped_column(Float, default=0.0)
+    version: Mapped[str] = mapped_column(String(16), default="1.0.0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 onupdate=utcnow)
+
+
+class LabRun(Base):
+    """A backtest / walk-forward / Monte Carlo run for one strategy on one
+    market and timeframe. Results are immutable once written; a new run is a
+    new row, so optimisation history is visible."""
+    __tablename__ = "lab_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), index=True)
+    market: Mapped[str] = mapped_column(String(16), index=True)      # stocks|crypto|etf|options|index
+    timeframe: Mapped[str] = mapped_column(String(8), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="backtest")  # backtest|walkforward|montecarlo|robustness
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    split: Mapped[str] = mapped_column(String(16), default="")         # train|validation|oos|all
+    period_start: Mapped[str] = mapped_column(String(10), default="")
+    period_end: Mapped[str] = mapped_column(String(10), default="")
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    by_regime: Mapped[dict] = mapped_column(JSON, default=dict)
+    by_session: Mapped[dict] = mapped_column(JSON, default=dict)
+    by_symbol: Mapped[dict] = mapped_column(JSON, default=dict)
+    equity_curve: Mapped[list] = mapped_column(JSON, default=list)
+    monthly: Mapped[dict] = mapped_column(JSON, default=dict)
+    costs: Mapped[dict] = mapped_column(JSON, default=dict)
+    data_coverage: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_labrun_lookup", "strategy_id", "market", "timeframe", "kind", "split"),)
+
+
+class LabTrade(Base):
+    """Permanent record of every lab signal, backtest or live. Never rewritten
+    after the outcome is known; corrections are new rows."""
+    __tablename__ = "lab_trades"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(48), index=True)
+    cohort: Mapped[str] = mapped_column(String(16), default="backtest", index=True)  # backtest|paper|live
+    split: Mapped[str] = mapped_column(String(16), default="")
+    market: Mapped[str] = mapped_column(String(16), index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    timeframe: Mapped[str] = mapped_column(String(8), index=True)
+    direction: Mapped[str] = mapped_column(String(8), default="long")
+    signal_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    entry_price: Mapped[float] = mapped_column(Float)
+    stop_price: Mapped[float] = mapped_column(Float)
+    target_1: Mapped[float] = mapped_column(Float, nullable=True)
+    target_2: Mapped[float] = mapped_column(Float, nullable=True)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str] = mapped_column(String(32), default="")
+    mfe_r: Mapped[float] = mapped_column(Float, nullable=True)
+    mae_r: Mapped[float] = mapped_column(Float, nullable=True)
+    return_pct: Mapped[float] = mapped_column(Float, nullable=True)
+    r_multiple: Mapped[float] = mapped_column(Float, nullable=True)
+    pnl_usd: Mapped[float] = mapped_column(Float, nullable=True)
+    result: Mapped[str] = mapped_column(String(12), default="", index=True)
+    regime: Mapped[str] = mapped_column(String(24), default="", index=True)
+    session_bucket: Mapped[str] = mapped_column(String(24), default="", index=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=True)
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+    invalidation: Mapped[str] = mapped_column(Text, default="")
+    features: Mapped[dict] = mapped_column(JSON, default=dict)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_labtrade_lookup", "strategy_id", "cohort", "market", "timeframe"),)
