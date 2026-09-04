@@ -36,6 +36,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "movers_cap": 35,
     # Crypto day-trades ran -1.17R at a 14% win rate; off unless enabled.
     "day_trade_crypto": "off",
+    # Daily loss breaker: when a model's realised loss for the session reaches
+    # daily_loss_limit_pct of its account, it stops opening new positions until
+    # the next session.  Blocked candidates are still recorded in the shadow log.
+    "daily_loss_breaker": "on",
     # Per-account open-risk ceiling.  "advisory" records the breach on the
     # signal and keeps trading; "enforce" refuses the entry and writes a
     # rejected-candidate row so the block is visible, never silent.

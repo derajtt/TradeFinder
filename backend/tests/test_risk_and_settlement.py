@@ -176,3 +176,53 @@ def test_day_stop_floor_applies_even_without_a_five_minute_atr():
     assert "atr_width = mult * atr5 if atr5 else 0.0" in block
     assert 'max(atr_width, fill * floor_)' in block
     assert '"day_floor"' in block                              # labelled when ATR is absent
+
+
+@pytest.mark.asyncio
+async def test_daily_loss_breaker_stops_new_entries_and_logs_them(db, monkeypatch):
+    """circuit_breaker_state could always pause on a daily loss, but every
+    caller passed daily_pnl_pct=0 so it never fired: one model lost 9.93% of
+    its account in a session against a 3% limit and kept opening trades."""
+    import app.strategy.platform as plat
+    from app.models import PaperAccount, PaperPosition, RejectedCandidate
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+
+    class _Ctx:
+        def __init__(self, s): self.s = s
+        async def __aenter__(self): return self.s
+        async def __aexit__(self, *a): return False
+    monkeypatch.setattr(plat, "SessionLocal", lambda: _Ctx(db))
+
+    today = str(plat.now_et().date())
+    from app.models import BuySignal
+    sig = BuySignal(symbol="LOSS", session_date=today, strategy_version="v2.0.0",
+                    initiated_at=datetime.now(timezone.utc), signal_uid="uid-loss",
+                    buy_signal_price=100.0, profile="chart_patterns")
+    db.add(sig)
+    await db.flush()
+    acc = PaperAccount(model_id="chart_patterns", season=1, starting_cash=10000.0,
+                       cash=10000.0, equity=10000.0, max_equity=10000.0)
+    db.add(acc)
+    # a closed loser worth -5% of the account, today
+    db.add(PaperPosition(signal_id=sig.id, symbol="LOSS", profile="chart_patterns", status="closed",
+                         strategy_version="v2.0.0", entry_fill=100.0, stop=96.0,
+                         target1=110.0, target2=120.0, size_usd=5000.0,
+                         exit_fill=90.0, closed_at=datetime.now(timezone.utc),
+                         opened_at=datetime.now(timezone.utc), events=[]))
+    await db.commit()
+
+    pct = await plat._daily_realized_pct(db, "chart_patterns", today)
+    assert pct < -3.0
+
+    v = {"action": "buy", "entry": 100.0, "stop": 95.0, "target1": 110.0,
+         "target2": 120.0, "score": 70, "setup": "t", "evidence": {},
+         "holding": "intraday"}
+    assert await plat.record_model_signal("chart_patterns", "NEW1", v, 100.0,
+                                          today, {}) is None
+    rej = (await db.execute(select(RejectedCandidate))).scalars().all()
+    assert any("daily loss" in r.rejection_reason for r in rej)
+
+    # turning it off restores the old behaviour
+    assert await plat.record_model_signal("chart_patterns", "NEW2", v, 100.0,
+                                          today, {"daily_loss_breaker": "off"}) is not None

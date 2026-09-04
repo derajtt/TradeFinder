@@ -350,6 +350,28 @@ _ACQUIRED_RE = re.compile(r"<transactionAcquiredDisposedCode>\s*<value>A</value>
 _OWNER_RE = re.compile(r"<rptOwnerName>([^<]+)</rptOwnerName>")
 
 
+async def _daily_realized_pct(db, model_id: str, session_date: str) -> float:
+    """Today's realised profit or loss on this model's ledger, as a percentage
+    of its starting cash.  Negative is a loss."""
+    acc = (await db.execute(select(PaperAccount).where(
+        PaperAccount.model_id == model_id))).scalar_one_or_none()
+    base = float(getattr(acc, "starting_cash", 0) or 0) or STARTING_CASH
+    rows = (await db.execute(select(PaperPosition).where(
+        PaperPosition.profile == model_id,
+        PaperPosition.status == "closed"))).scalars().all()
+    total = 0.0
+    for p in rows:
+        if not p.closed_at or not p.entry_fill or p.exit_fill is None:
+            continue
+        closed = p.closed_at
+        if closed.tzinfo is None:
+            closed = closed.replace(tzinfo=timezone.utc)
+        if str(closed.astimezone(ET).date()) != session_date:
+            continue
+        total += float(p.size_usd or 0) * (float(p.exit_fill) / float(p.entry_fill) - 1.0)
+    return total / base * 100.0
+
+
 async def _reject_risk(db, model_id, symbol, session_date, fill, why, snapshot):
     """Record a risk-ceiling rejection so a model held back by portfolio limits
     is visibly gated rather than silently quiet."""
@@ -529,6 +551,25 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         # open risk against a 3% ceiling.  Advisory by default: the breach is
         # recorded on the signal and counted, but the trade still opens, because
         # silently muting four models is the worse failure.
+        # Daily loss breaker.  circuit_breaker_state has always been able to
+        # pause entries on a daily loss, but every caller passed daily_pnl_pct=0,
+        # so it never fired: RS Reclaim lost 9.93% of its account on Sep 4
+        # against a documented 3% limit and kept opening trades.  Recording is
+        # unaffected — the blocked candidate is written to the shadow log, so
+        # the counterfactual is still measurable.
+        if str(settings.get("daily_loss_breaker", "on")).lower() != "off":
+            limit = float(settings.get("daily_loss_limit_pct")
+                          or RISK_DEFAULTS["daily_loss_limit_pct"])
+            day_pct = await _daily_realized_pct(db, model_id, session_date)
+            if day_pct <= -abs(limit):
+                await _reject_risk(db, model_id, symbol, session_date, fill,
+                                   f"daily loss {day_pct:.2f}% has reached the "
+                                   f"{-abs(limit):.2f}% limit for this account",
+                                   {"daily_pnl_pct": round(day_pct, 3),
+                                    "daily_limit_pct": -abs(limit),
+                                    "account_equity": round(acc.equity, 2)})
+                return None
+
         open_risk = 0.0
         for op in (await db.execute(select(PaperPosition).where(
                 PaperPosition.status == "open",
