@@ -1228,7 +1228,16 @@ class Scheduler:
                         "symbol": sym, "price": px, "type": "buy", "model": mid,
                         "score": 70.0, "signal_uid": sig.signal_uid,
                         "initiated_at": sig.initiated_at.isoformat()})
-            hb.update({"status": "LIVE", "skip_reason": None,
+            # symbols_with_data == 0 makes the health API derive WAITING, so a
+            # pass that ran and simply found no confluence must still carry its
+            # reason — otherwise the strategy reads "waiting" with a blank
+            # explanation, which is what a broken model looks like.
+            need_txt = " + ".join(MODELS[r]["name"] if r in MODELS else r
+                                  for r in sorted(need))
+            hb.update({"status": "LIVE",
+                       "skip_reason": (None if candidates else
+                                       f"ran this pass; no stock has a buy from all of "
+                                       f"{need_txt} today"),
                        "last_scan_at": now_utc().isoformat(),
                        "last_seen_at": now_utc().isoformat(),
                        "symbols_scanned": len(fired_today),

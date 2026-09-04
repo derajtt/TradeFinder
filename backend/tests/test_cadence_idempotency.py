@@ -561,3 +561,14 @@ def test_promotion_sample_counts_settled_trades_on_the_running_version():
     assert 'BuySignal.strategy_version == cur_ver' in block
     assert 'sample_met' in block
     assert '{paper_n}/100 below' not in src           # the contradictory wording is gone
+
+
+def test_custom_strategies_say_why_when_no_confluence_is_found():
+    """A pass that ran and found nothing cleared skip_reason, and because
+    symbols_with_data was 0 the health API derived WAITING — so the strategy
+    read "waiting" with a blank reason, exactly like a broken one."""
+    import inspect
+    from app import scheduler as sch
+    src = inspect.getsource(sch.Scheduler._custom_confluence_pass)
+    assert '"skip_reason": (None if candidates else' in src
+    assert "no stock has a buy from all of" in src

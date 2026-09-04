@@ -50,6 +50,13 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
     api_24h = (await db.execute(select(func.count(ProviderRequest.id))
                                 .where(ProviderRequest.ts_utc >= day_cut))).scalar() or 0
     five_cut = datetime.now(timezone.utc) - timedelta(minutes=5)
+    # Requests logged since the last flush; they are not in the table yet.
+    _pending = []
+    try:
+        for _c in (sched.ctx.fmp.http, sched.ctx.sec.http) if sched else ():
+            _pending.extend(_c.request_log)
+    except Exception:                       # metering must never break /status
+        _pending = []
     api_5m = (await db.execute(select(func.count(ProviderRequest.id))
                                .where(ProviderRequest.ts_utc >= five_cut))).scalar() or 0
     throttles_1h = (await db.execute(select(func.count(ProviderRequest.id))
@@ -75,8 +82,13 @@ async def status(request: Request, db: AsyncSession = Depends(get_session)):
         "scanner": (sched.state if sched else {"phase": "not_started"}),
         "next_scan_start": next_scan_start().isoformat(),
         "active_signals": active,
-        "api_calls_24h": api_24h,
-        "api_calls_per_min": round(api_5m / 5.0, 1),
+        "api_calls_24h": api_24h + len(_pending),
+        # Provider rows reach the database only when a cycle ends, so during a
+        # long premarket discovery pass the meter read 0/min exactly when the
+        # scanner was busiest.  Count the rows still waiting in memory too.
+        "api_calls_per_min": round((api_5m + sum(1 for r in _pending
+                                                 if r.get("ts_utc") and r["ts_utc"] >= five_cut))
+                                   / 5.0, 1),
         "api_throttles_1h": throttles_1h,
         "ai_usage_month": {"calls": len(ai_rows),
                            "est_cost_usd": round(sum(r.est_cost_usd for r in ai_rows), 4)},
