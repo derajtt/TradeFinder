@@ -12,6 +12,11 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
+# Import the models so every table is registered on Base.metadata BEFORE
+# create_all runs.  Without this the fixture built only the tables that some
+# earlier test happened to import, so a test importing app.models inside its
+# own body passed or failed depending on collection order.
+import app.models  # noqa: F401  (registers the mappings)
 
 
 @pytest_asyncio.fixture

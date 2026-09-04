@@ -224,8 +224,12 @@ async def test_position_with_target_behind_entry_is_refused(db, monkeypatch):
     assert [p.symbol for p in opened] == ["GEO3"]
     rej = (await db.execute(select(RejectedCandidate))).scalars().all()
     assert len(rej) == 2 and all("invalid_trade_geometry" in r.rejection_reason for r in rej)
-    # and the original stop is preserved for R even if the stop later moves
-    assert opened[0].events[0]["original_stop"] == 98.5
+    # The original stop is preserved for R even if the stop later moves.  In
+    # day-trading mode it is the geometry's stop, not the engine's: fill is
+    # 100.4 after 0.4% slippage and breakout_finder's 2% floor puts the stop at
+    # 98.392.  R must be measured against the risk actually taken.
+    assert opened[0].events[0]["original_stop"] == 98.392
+    assert opened[0].events[0]["original_stop"] == opened[0].stop
 
 
 async def test_r_multiple_uses_original_stop_after_breakeven(db, monkeypatch):

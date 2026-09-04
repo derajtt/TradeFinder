@@ -161,3 +161,18 @@ def test_open_risk_ceiling_is_checked_per_account_before_a_fill():
     assert hasattr(BuySignal, "evidence_snapshot")
     assert "sig.evidence_snapshot" in src and "sig.evidence " not in src
     assert DEFAULT_SETTINGS["portfolio_risk_gating"] == "advisory"
+
+
+def test_day_stop_floor_applies_even_without_a_five_minute_atr():
+    """The geometry block was gated on atr5 being truthy, so a model firing on
+    a symbol with no intraday bars kept the engine's own stop: four positions
+    opened at 1.09-2.08% under a 4% floor on Sep 4."""
+    import inspect
+    from app.strategy import platform as plat
+    src = inspect.getsource(plat.record_model_signal)
+    i = src.index("day_mode = ")
+    block = src[i:i + 3200]
+    assert "if day_mode and ATR_STOP_MULT.get(" in block      # atr5 no longer gates it
+    assert "atr_width = mult * atr5 if atr5 else 0.0" in block
+    assert 'max(atr_width, fill * floor_)' in block
+    assert '"day_floor"' in block                              # labelled when ATR is absent

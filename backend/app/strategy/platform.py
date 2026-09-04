@@ -441,9 +441,26 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
         # of price, and targets re-laid at 1.5R / 3R from the actual fill.
         day_mode = str(settings.get("day_trading_mode", "on")).lower() != "off"
         atr5 = verdict.get("atr_5m")
+        # Check the ENGINE's own levels before day geometry can overwrite them.
+        # The rewrite below replaces stop and targets with volatility-derived
+        # ones, which would quietly repair an engine emitting a target behind
+        # its entry — the exact defect that once closed positions at a loss
+        # labelled as target hits. A broken engine must still be rejected and
+        # logged, not papered over.
+        _min_risk = fill * MIN_RISK_FRAC
+        _raw_bad = None
+        if stop_ is None or stop_ >= fill - _min_risk:
+            _raw_bad = (f"engine stop {stop_} not at least {MIN_RISK_FRAC:.2%} "
+                        f"below fill {fill}")
+        elif t1_ is None or t1_ <= fill:
+            _raw_bad = f"engine target1 {t1_} is not above fill {fill}"
+        if _raw_bad:
+            await _reject_geometry(db, model_id, symbol, session_date, verdict,
+                                   fill, _raw_bad)
+            return None
         # Engines listed with None keep their own levels: RS Reclaim's losers
         # keep falling, and every wider stop tested made it worse.
-        if day_mode and atr5 and ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT) is not None:
+        if day_mode and ATR_STOP_MULT.get(model_id, ATR_STOP_MULT_DEFAULT) is not None:
             # Counterfactual on 447 closed trades: at 2x the original stop
             # with a 3R target, Chart Patterns went -0.79 -> +0.24R,
             # Confluence -0.81 -> +0.07, Opening Drive -0.59 -> +0.11. RS
@@ -456,12 +473,19 @@ async def record_model_signal(model_id: str, symbol: str, verdict: Dict[str, Any
             # Floor matters more than the multiple: sub-1% stops on movers
             # were a stop-out machine (91% stopped, 52% of them after reaching
             # +1R); 3-5% was the only positive band on Sep 3.
-            r_vol = min(max(mult * atr5, fill * floor_), fill * DAY_STOP_CAP)
+            # Without a 5-minute ATR the whole block used to be skipped and the
+            # engine's own stop went through unchanged — which is how four
+            # positions opened today at 1.09-2.08% under a 4% floor.  The ATR
+            # only sets the width above the floor; the floor itself does not
+            # depend on having one.
+            atr_width = mult * atr5 if atr5 else 0.0
+            r_vol = min(max(atr_width, fill * floor_), fill * DAY_STOP_CAP)
             stop_ = round(fill - r_vol, 4)
             t1_ = round(fill + t1r * r_vol, 4)
             t2_ = round(fill + 2 * t1r * r_vol, 4)
             verdict = {**verdict, "stop": stop_, "target1": t1_, "target2": t2_,
-                       "geometry": "day_atr", "atr_5m": atr5}
+                       "geometry": "day_atr" if atr5 else "day_floor",
+                       "atr_5m": atr5}
         min_risk = fill * MIN_RISK_FRAC
         bad = None
         if stop_ is None or stop_ >= fill - min_risk:
